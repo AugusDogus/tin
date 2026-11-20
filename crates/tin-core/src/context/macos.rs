@@ -21,6 +21,11 @@ pub fn focused(_want_screenshot: impl FnOnce(&Window) -> bool) -> Result<super::
     focused_window().map(|window| super::Focus { window, screenshot: None })
 }
 
+/// Not built yet on macOS, where `screencapture -i` is the native picker.
+pub fn snapshot() -> Result<crate::snapshot::Snapshot, String> {
+    Err("Picking a window or region isn't built for macOS yet.".into())
+}
+
 fn focused_window() -> Result<Window, String> {
     let app = osascript(
         "AppleScript",

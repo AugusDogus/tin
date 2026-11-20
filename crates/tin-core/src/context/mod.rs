@@ -164,6 +164,12 @@ fn page(window: Option<&Window>, text: Option<&CapturedText>, notes: &mut Vec<No
     }
 }
 
+/// Freezes the monitor the focused window is on, with the windows visible on it, for picking
+/// what to capture.
+pub fn snapshot() -> Result<crate::snapshot::Snapshot, String> {
+    platform::snapshot()
+}
+
 /// Puts text on the system clipboard.
 pub fn copy(text: &str) -> Result<(), String> {
     platform::copy(text)

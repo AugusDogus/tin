@@ -13,6 +13,7 @@ pub mod hook;
 pub mod intent;
 pub mod page;
 pub mod screenshot;
+pub mod snapshot;
 pub mod store;
 
 use std::path::PathBuf;

@@ -75,6 +75,13 @@ pub fn focused(want_screenshot: impl FnOnce(&Window) -> bool) -> Result<super::F
     focused_window().map(|window| super::Focus { window, screenshot: None })
 }
 
+pub fn snapshot() -> Result<crate::snapshot::Snapshot, String> {
+    if super::cosmic::available() {
+        return super::cosmic::snapshot();
+    }
+    Err("Picking a window or region needs COSMIC for now.".into())
+}
+
 fn focused_window() -> Result<Window, String> {
     let var = |k: &str| env::var_os(k).is_some();
     let desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
