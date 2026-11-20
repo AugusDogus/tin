@@ -259,7 +259,13 @@ mod tests {
         let (frame, extents) = a11y.frame_for(&window).unwrap_or_else(|| panic!("no frame titled {title:?}"));
         println!("frame {extents:?} found in {:?}", started.elapsed());
         let extents = extents.unwrap_or_else(|| panic!("the frame reports no extents"));
-        let (x, y) = (extents.x + extents.width / 3, extents.y + extents.height / 2);
+        let (x, y) = match std::env::var("TIN_A11Y_POINT")
+            .ok()
+            .and_then(|p| p.split_once(',').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        {
+            Some(point) => point,
+            None => (extents.x + extents.width / 3, extents.y + extents.height / 2),
+        };
         let started = std::time::Instant::now();
         let chain = a11y.chain_at(&frame, x, y);
         println!("chain at ({x}, {y}) in {:?}:", started.elapsed());
