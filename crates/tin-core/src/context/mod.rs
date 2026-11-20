@@ -25,6 +25,9 @@ pub enum TextGrab {
     /// clipboard restored after).
     Selection,
     Clipboard,
+    /// The selection, else the clipboard (where the desktop doesn't share the selection, copying
+    /// first still works). The capture says which it was.
+    SelectionOrClipboard,
     None,
 }
 
@@ -70,20 +73,27 @@ pub fn gather(options: Options) -> Gathered {
     // The window first: grabbing the selection on macOS sends ⌘C to it.
     let window = platform::focused_window().map_err(|message| notes.push(Note { part: Part::Window, message })).ok();
 
-    let (read, from) = match options.text {
+    let read = |grab: TextGrab| match grab {
         TextGrab::Selection => (platform::selection(), TextSource::Selection),
         TextGrab::Clipboard => (platform::clipboard(), TextSource::Clipboard),
-        TextGrab::None => (Ok(None), TextSource::Selection),
+        TextGrab::SelectionOrClipboard | TextGrab::None => (Ok(None), TextSource::Selection),
     };
-    let text = read
-        .map_err(|message| notes.push(Note { part: Part::Text, message }))
-        .ok()
-        .flatten()
-        .filter(|t| !t.trim().is_empty())
-        .map(|text| CapturedText { text, from });
+    let mut take = |(result, from): (Result<Option<String>, String>, TextSource)| {
+        result
+            .map_err(|message| notes.push(Note { part: Part::Text, message }))
+            .ok()
+            .flatten()
+            .filter(|t| !t.trim().is_empty())
+            .map(|text| CapturedText { text, from })
+    };
+    let text = match options.text {
+        TextGrab::SelectionOrClipboard => take(read(TextGrab::Selection)).or_else(|| take(read(TextGrab::Clipboard))),
+        grab => take(read(grab)),
+    };
     if text.is_none() && options.text != TextGrab::None && !notes.iter().any(|n| n.part == Part::Text) {
         let message = match options.text {
             TextGrab::Clipboard => "The clipboard has no text.",
+            TextGrab::SelectionOrClipboard => "Nothing is selected and the clipboard has no text.",
             _ => {
                 "Nothing is selected, or this desktop doesn't share the selection with other apps (COSMIC doesn't). Copy it and capture the clipboard instead."
             }
