@@ -180,6 +180,17 @@ impl Picker {
         std::thread::spawn(move || select(me, main, snaps));
     }
 
+    /// The card closed some other way than saving or Esc (its close button, the compositor):
+    /// throw the note away and make sure Hex isn't left recording. Saving and Esc move the stage
+    /// on before they close the window, so they never get here with a note.
+    pub fn closed(&mut self) {
+        let (stage, cancel) = after_close(std::mem::replace(&mut self.stage, Stage::Idle));
+        self.stage = stage;
+        if cancel {
+            self.cancel_hex();
+        }
+    }
+
     fn cancel_hex(&self) {
         if let Ok(tin) = &self.tin {
             let hex = tin.hex();
@@ -187,6 +198,16 @@ impl Picker {
                 let _ = hex.cancel();
             });
         }
+    }
+}
+
+/// What a closing card leaves behind, and whether Hex must stop recording. Only a showing note
+/// is dropped; picking again and saving move on before they close the window. A transcription
+/// already under way finishes, but its result finds no note and is dropped.
+fn after_close(stage: Stage) -> (Stage, bool) {
+    match stage {
+        Stage::Noting { voice, .. } => (Stage::Idle, matches!(voice, Voice::Starting | Voice::Recording)),
+        other => (other, false),
     }
 }
 
@@ -297,4 +318,48 @@ pub fn view(s: &Picker, cx: &mut Cx<Picker>) -> El {
                 .child(text("Enter saves · Esc picks again").font(type_::LABEL).color(t.text_secondary))
                 .child(spacer()),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tin_core::screenshot::Image;
+
+    fn noting(voice: Voice) -> Stage {
+        let snap = Arc::new(Snapshot {
+            output: "DP-1".into(),
+            bounds: Rect { x: 0, y: 0, width: 1, height: 1 },
+            image: Image { width: 1, height: 1, rgba: vec![0; 4] },
+            windows: Vec::new(),
+        });
+        let pick = Pick {
+            snap: snap.clone(),
+            rect: Rect { x: 0, y: 0, width: 1, height: 1 },
+            kind: SelectionKind::Region,
+            window: None,
+        };
+        Stage::Noting { snaps: Arc::new(vec![snap]), pick, voice }
+    }
+
+    #[test]
+    fn closing_a_card_that_records_drops_the_note_and_stops_hex() {
+        for voice in [Voice::Starting, Voice::Recording] {
+            let (stage, cancel) = after_close(noting(voice));
+            assert!(matches!(stage, Stage::Idle) && cancel);
+        }
+    }
+
+    #[test]
+    fn closing_after_hex_stopped_drops_the_note_without_a_cancel() {
+        for voice in [Voice::Idle, Voice::Transcribing, Voice::Failed("x".into())] {
+            let (stage, cancel) = after_close(noting(voice));
+            assert!(matches!(stage, Stage::Idle) && !cancel);
+        }
+    }
+
+    #[test]
+    fn closing_while_picking_again_or_saving_changes_nothing() {
+        assert!(matches!(after_close(Stage::Selecting), (Stage::Selecting, false)));
+        assert!(matches!(after_close(Stage::Saving), (Stage::Saving, false)));
+    }
 }

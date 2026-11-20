@@ -118,7 +118,7 @@ fn run(launch: Launch) -> std::process::ExitCode {
         picker.init(move || Picker::new(me, main_handle)).run();
         return std::process::ExitCode::SUCCESS;
     }
-    let picker = App::new(picker_spec).windowless().keep_running();
+    let picker = App::new(picker_spec).windowless().keep_running().on_close(|p: &mut Picker, _| p.closed());
     let picker_handle = picker.handle();
     let picker = picker.init({
         let (me, main) = (picker_handle.clone(), main_handle.clone());
