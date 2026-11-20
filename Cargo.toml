@@ -24,3 +24,13 @@ parley_engine = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328
 wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
 accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
 accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
+
+# The picker draws whole monitors in software; keep Tin's own crates fast in debug builds too.
+[profile.dev.package.tin-app]
+opt-level = 2
+
+[profile.dev.package.tin-core]
+opt-level = 2
+
+[profile.dev.package.ab_glyph_rasterizer]
+opt-level = 2

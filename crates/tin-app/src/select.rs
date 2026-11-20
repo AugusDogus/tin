@@ -91,7 +91,15 @@ pub fn pick(snaps: &[Arc<Snapshot>]) -> Result<Option<Picked>, String> {
         layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
         layer.wl_surface().set_buffer_scale(scale);
         layer.commit();
-        picker.surfaces.push(Surface { layer, snap: snap.clone(), scale, size: None, backdrop: None, shown: None });
+        picker.surfaces.push(Surface {
+            layer,
+            snap: snap.clone(),
+            scale,
+            size: None,
+            backdrop: None,
+            shown: None,
+            in_flight: false,
+        });
     }
     if picker.surfaces.is_empty() {
         return Err("none of the frozen monitors is still connected".into());
@@ -115,6 +123,9 @@ struct Surface {
     backdrop: Option<Backdrop>,
     /// What the last frame showed, to skip redrawing the same thing.
     shown: Option<Frame>,
+    /// A frame was committed and the compositor hasn't asked for the next one yet. Drawing
+    /// waits for that, so a fast mouse costs one redraw per display refresh, not one per event.
+    in_flight: bool,
 }
 
 /// What one surface shows.
@@ -174,12 +185,12 @@ impl Picker {
         }
     }
 
-    fn draw(&mut self, i: usize, _qh: &QueueHandle<Self>) {
+    fn draw(&mut self, i: usize, qh: &QueueHandle<Self>) {
         let frame = self.frame_for(i);
         let font = self.font.as_ref();
         let s = &mut self.surfaces[i];
         let Some((w, h)) = s.size else { return };
-        if s.shown.as_ref() == Some(&frame) {
+        if s.in_flight || s.shown.as_ref() == Some(&frame) {
             return;
         }
         let (bw, bh) = (w * s.scale as u32, h * s.scale as u32);
@@ -205,10 +216,13 @@ impl Picker {
                 font.map_or(0.0, |f| crate::canvas::measure(f, HINT, size)).ceil() as i32 + (size * 1.4) as i32 + 4;
             c.pill(font, (bw as i32 - width) / 2, 14 * k, HINT, size, width);
         }
-        s.layer.wl_surface().damage_buffer(0, 0, bw as i32, bh as i32);
-        if buffer.attach_to(s.layer.wl_surface()).is_ok() {
+        let surface = s.layer.wl_surface();
+        surface.damage_buffer(0, 0, bw as i32, bh as i32);
+        if buffer.attach_to(surface).is_ok() {
+            surface.frame(qh, surface.clone());
             s.layer.commit();
             s.shown = Some(frame);
+            s.in_flight = true;
         }
     }
 
@@ -408,7 +422,13 @@ impl CompositorHandler for Picker {
         _: wl_output::Transform,
     ) {
     }
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+    /// The compositor is ready for the next frame: draw it if anything changed meanwhile.
+    fn frame(&mut self, _: &Connection, qh: &QueueHandle<Self>, surface: &wl_surface::WlSurface, _: u32) {
+        if let Some(i) = self.surface_index(surface) {
+            self.surfaces[i].in_flight = false;
+            self.draw(i, qh);
+        }
+    }
     fn surface_enter(
         &mut self,
         _: &Connection,

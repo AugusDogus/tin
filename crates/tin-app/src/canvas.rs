@@ -200,3 +200,26 @@ mod tests {
         assert_eq!(&buf[0..4], &[0, 0, 0, 0]);
     }
 }
+
+#[cfg(test)]
+mod timing {
+    use super::*;
+
+    /// `cargo test -p tin-app -- --ignored frame_cost --nocapture`
+    #[test]
+    #[ignore = "a measurement, not a check"]
+    fn frame_cost() {
+        let image = Image { width: 1920, height: 1080, rgba: vec![90; 1920 * 1080 * 4] };
+        let t = std::time::Instant::now();
+        let backdrop = Backdrop::new(&image, 1920, 1080);
+        let built = t.elapsed();
+        let mut out = vec![0; 1920 * 1080 * 4];
+        let t = std::time::Instant::now();
+        for i in 0..60 {
+            backdrop.compose(&mut out, Some(Rect { x: i, y: i, width: 900, height: 600 }));
+            let mut c = Canvas { buf: &mut out, width: 1920, height: 1080 };
+            c.outline(Rect { x: i, y: i, width: 900, height: 600 }, 2, Rgba(0, 255, 0, 255));
+        }
+        println!("backdrop {built:?}, frame {:?}", t.elapsed() / 60);
+    }
+}
