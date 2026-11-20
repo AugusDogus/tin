@@ -9,21 +9,24 @@
 mod double_tap;
 mod ipc;
 mod keys;
+mod picker;
 mod scenes;
 mod ui;
 mod view;
 
-use rune::{App, AppSpec};
-use tin_core::context::TextGrab;
+use std::sync::Arc;
+
+use rune::{App, AppSpec, WindowSpec};
 
 use crate::ipc::{Message, Request};
+use crate::picker::Picker;
 use crate::ui::{Status, Ui};
 
 const USAGE: &str = "usage: tin-app [--capture | --background]
 
   (no flag)     open Tin's window
-  --capture     read the selection and the page you're on, then open the capture panel;
-                bind this to a desktop shortcut
+  --capture     freeze the screen you're on and pick a window or area to capture
+                (double-tap Shift does the same)
   --background  start without a window (for login items); shortcuts and --capture still work";
 
 enum Launch {
@@ -32,6 +35,8 @@ enum Launch {
     Background,
     /// Rune's headless tooling (`--snap`, `--tree`, `--script`, …): no IPC, no shortcut.
     Tooling,
+    /// The same, for the picker, with made-up scenes: `tin-app --picker --snap out.png --scene picking`.
+    PickerTooling(Vec<String>),
 }
 
 fn main() -> std::process::ExitCode {
@@ -40,6 +45,7 @@ fn main() -> std::process::ExitCode {
         (None, _) => Launch::Window,
         (Some("--capture"), None) => Launch::Capture,
         (Some("--background"), None) => Launch::Background,
+        (Some("--picker"), _) => Launch::PickerTooling(std::env::args().skip(2).collect()),
         (Some(flag), _) if flag.starts_with("--") && !matches!(flag, "--capture" | "--background" | "--help") => {
             Launch::Tooling
         }
@@ -57,7 +63,7 @@ fn main() -> std::process::ExitCode {
     let request = match launch {
         Launch::Capture => Some(Request::Capture),
         Launch::Window => Some(Request::Show),
-        Launch::Background | Launch::Tooling => None,
+        Launch::Background | Launch::Tooling | Launch::PickerTooling(_) => None,
     };
     if let Some(request) = request {
         match ipc::send(&Message { request, activation_token: activation_token.clone() }) {
@@ -69,39 +75,60 @@ fn main() -> std::process::ExitCode {
     run(launch)
 }
 
+/// Starts a capture: freezes the monitor and opens the picker.
+type Capture = Arc<dyn Fn() + Send + Sync>;
+
 fn run(launch: Launch) -> std::process::ExitCode {
     let spec = AppSpec {
         on_key: Some(view::on_key),
         scenes: scenes::SCENES,
         ..AppSpec::new("Tin", (440.0, 620.0), || unreachable!("App::init builds the state"), view::view)
     };
-    let app = App::new(spec).keep_running().on_focus(|s: &mut Ui, focused, _| {
+    let main = App::new(spec).keep_running().on_focus(|s: &mut Ui, focused, _| {
         if focused {
             s.reload();
         }
     });
-    let app = match launch {
-        Launch::Window | Launch::Tooling => app,
-        Launch::Capture | Launch::Background => app.windowless(),
+    let main = match launch {
+        Launch::Window | Launch::Tooling | Launch::PickerTooling(_) => main,
+        Launch::Capture | Launch::Background => main.windowless(),
     };
-    let handle = app.handle();
-    let me = handle.clone();
-    let app = app.init(move || Ui::new(me));
+    let main_handle = main.handle();
+    let main = main.init({
+        let me = main_handle.clone();
+        move || Ui::new(me)
+    });
     if let Launch::Tooling = launch {
-        app.run();
+        main.run();
         return std::process::ExitCode::SUCCESS;
     }
+    // Picker tooling never runs the list window; `main` only lends its handle.
 
-    let on_message = handle.clone();
-    if let Err(e) = ipc::listen(move |m: Message| {
-        let token = m.activation_token;
-        match m.request {
-            Request::Capture => on_message.update(move |s, _| s.start_capture(TextGrab::SelectionOrClipboard, token)),
-            Request::Show => match token {
-                Some(token) => on_message.activate(token),
-                None => on_message.open(),
-            },
-        }
+    let picker_spec = AppSpec {
+        on_key: Some(picker::on_key),
+        ..AppSpec::new("Tin capture", (1280.0, 800.0), || unreachable!("App::init builds the state"), picker::view)
+    };
+    if let Launch::PickerTooling(args) = launch {
+        let picker = App::new(AppSpec { scenes: scenes::picker::SCENES, ..picker_spec }).args(args);
+        let me = picker.handle();
+        picker.init(move || Picker::new(me, main_handle)).run();
+        return std::process::ExitCode::SUCCESS;
+    }
+    let picker = App::new(picker_spec).windowless().keep_running().full_screen(true);
+    let picker_handle = picker.handle();
+    let picker = picker.init({
+        let (me, main) = (picker_handle.clone(), main_handle.clone());
+        move || Picker::new(me, main)
+    });
+    let capture: Capture = Arc::new(move || picker_handle.update(|p, _| p.start()));
+
+    let (on_message, capture_message) = (main_handle.clone(), capture.clone());
+    if let Err(e) = ipc::listen(move |m: Message| match m.request {
+        Request::Capture => capture_message(),
+        Request::Show => match m.activation_token {
+            Some(token) => on_message.activate(token),
+            None => on_message.open(),
+        },
     }) {
         eprintln!(
             "tin-app: couldn't listen on {} ({e}); `tin-app --capture` won't reach this window.",
@@ -110,48 +137,40 @@ fn run(launch: Launch) -> std::process::ExitCode {
     }
 
     if let Launch::Capture = launch {
-        handle.update(|s, _| s.start_capture(TextGrab::SelectionOrClipboard, None));
+        capture();
     }
-    register_shortcut(&handle);
-    watch_double_shift(&handle);
-    app.run();
+    register_shortcut(&main_handle, capture.clone());
+    watch_double_shift(&main_handle, capture);
+    rune::run_windows(move |_| -> Vec<rune::AnyWindowSpec> {
+        vec![WindowSpec::from_app("main", main).into(), WindowSpec::from_app("picker", picker).into()]
+    });
     std::process::ExitCode::SUCCESS
 }
 
 /// Double-tap Shift to capture, unless `[app] double_shift = false`.
-fn watch_double_shift(handle: &rune::AppHandle<Ui>) {
+fn watch_double_shift(handle: &rune::AppHandle<Ui>, capture: Capture) {
     let config = tin_core::config::Config::load(&tin_core::Paths::from_env().config);
     if !config.is_ok_and(|c| c.double_shift()) {
         return;
     }
-    let (fire, fail) = (handle.clone(), handle.clone());
-    keys::watch(
-        move || {
-            eprintln!("tin-app: double Shift, capturing");
-            fire.update(|s, _| s.start_capture(TextGrab::SelectionOrClipboard, None));
-        },
-        move |message| fail.update(move |s, _| s.status = Some(Status::Error(message))),
-    );
+    let fail = handle.clone();
+    keys::watch(move || capture(), move |message| fail.update(move |s, _| s.status = Some(Status::Error(message))));
 }
 
 /// Registers `[app] shortcut` from the config, once the app has started (registration before
 /// then is refused), and off the UI thread: on Wayland the desktop portal may ask the user first.
-fn register_shortcut(handle: &rune::AppHandle<Ui>) {
+fn register_shortcut(handle: &rune::AppHandle<Ui>, capture: Capture) {
     let handle = handle.clone();
     handle.clone().update(move |_, _| {
-        std::thread::spawn(move || register_now(&handle));
+        std::thread::spawn(move || register_now(&handle, capture));
     });
 }
 
-fn register_now(handle: &rune::AppHandle<Ui>) {
+fn register_now(handle: &rune::AppHandle<Ui>, capture: Capture) {
     let config = tin_core::config::Config::load(&tin_core::Paths::from_env().config);
     let Some(chord) = config.ok().and_then(|c| c.app.shortcut) else { return };
     let result = chord.parse::<rune::Shortcut>().map_err(|e| e.to_string()).and_then(|shortcut| {
-        handle
-            .register_shortcut(shortcut, |s: &mut Ui, tx| {
-                s.start_capture(TextGrab::SelectionOrClipboard, tx.activation_token().map(str::to_owned))
-            })
-            .map_err(|e| e.to_string())
+        handle.register_shortcut(shortcut, move |_: &mut Ui, _| capture()).map_err(|e| e.to_string())
     });
     if let Err(e) = result {
         let message = format!(

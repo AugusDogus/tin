@@ -176,6 +176,7 @@ impl Ui {
             },
             note: None,
             screenshot: composer.screenshot.clone(),
+            selection: None,
             intent: Intent { said: Some(self.purpose.text.clone()), ..Intent::default() },
         };
         match tin.save(draft) {

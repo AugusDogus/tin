@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::intent::Intent;
 use crate::page::Page;
 use crate::screenshot::Screenshot;
+use crate::snapshot::Selection;
 
 /// One saved capture. Stored as `<id>.json`; this is the schema agents read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,9 +27,12 @@ pub struct Capture {
     /// A typed note, separate from the captured text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    /// A picture of the focused window, when it wasn't a browser.
+    /// A picture: of what the user picked, or of the focused window when it wasn't a browser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screenshot: Option<ScreenshotFile>,
+    /// The window or area the user picked on screen, when they picked one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<Selection>,
     pub intent: Intent,
 }
 
@@ -91,6 +95,7 @@ pub struct Draft {
     pub voice: Option<VoiceNote>,
     pub note: Option<String>,
     pub screenshot: Option<Screenshot>,
+    pub selection: Option<Selection>,
     pub intent: Intent,
 }
 
@@ -129,6 +134,7 @@ impl Capture {
             note: blank(draft.note),
             // The store writes the picture and fills this in (`Tin::save`).
             screenshot: None,
+            selection: draft.selection,
             intent: draft.intent,
         })
     }

@@ -223,6 +223,7 @@ fn capture(args: CaptureArgs) -> Outcome {
         voice,
         note: args.note,
         screenshot: gathered.screenshot,
+        selection: None,
         intent: Intent { said: args.purpose, ..Intent::default() },
     };
     let saved = tin.save(draft).map_err(|e| e.to_string())?;

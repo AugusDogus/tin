@@ -164,6 +164,11 @@ fn page(window: Option<&Window>, text: Option<&CapturedText>, notes: &mut Vec<No
     }
 }
 
+/// The page a window shows, when it's a browser Tin can read.
+pub fn page_for(window: &Window) -> Option<Page> {
+    page(Some(window), None, &mut Vec::new())
+}
+
 /// Freezes the monitor the focused window is on, with the windows visible on it, for picking
 /// what to capture.
 pub fn snapshot() -> Result<crate::snapshot::Snapshot, String> {
