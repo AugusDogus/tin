@@ -137,9 +137,9 @@ impl Accessibility {
         Some((frame, extents))
     }
 
-    /// The elements under a point (window coordinates), outermost first, below `frame`.
-    /// Toolkits stack same-sized panels (Chromium has empty ones beside the page), so each
-    /// child under the point is tried and the deepest chain wins, within a budget of calls.
+    /// The elements under a point (window coordinates), outermost first, below `frame`. Every
+    /// child under the point is explored (within a budget of calls) and [`topmost`] picks which
+    /// to follow.
     pub fn chain_at(&self, frame: &Node, x: i32, y: i32) -> Vec<Element> {
         let mut budget = MAX_VISITS;
         self.descend(frame, x, y, 0, &mut budget)
@@ -159,18 +159,29 @@ impl Accessibility {
                 under.push((child, r));
             }
         }
-        under.sort_by_key(|(_, r)| r.area());
-        let mut best: Vec<Element> = Vec::new();
-        for (child, rect) in under {
-            let below = self.descend(&child, x, y, depth + 1, budget);
-            if best.is_empty() || below.len() + 1 > best.len() {
-                let mut chain = vec![Element { rect, role: self.role(&child), name: self.name(&child) }];
-                chain.extend(below);
-                best = chain;
-            }
-        }
-        best
+        let explored: Vec<(Node, Rect, Vec<Element>)> = under
+            .into_iter()
+            .map(|(child, rect)| {
+                let below = self.descend(&child, x, y, depth + 1, budget);
+                (child, rect, below)
+            })
+            .collect();
+        let Some(i) = topmost(&explored.iter().map(|(_, _, below)| !below.is_empty()).collect::<Vec<_>>()) else {
+            return Vec::new();
+        };
+        let Some((child, rect, below)) = explored.into_iter().nth(i) else { return Vec::new() };
+        let mut chain = vec![Element { rect, role: self.role(&child), name: self.name(&child) }];
+        chain.extend(below);
+        chain
     }
+}
+
+/// Which of the siblings under the point to follow, given whether each has anything under the
+/// point inside it. Later siblings are drawn over earlier ones (an open menu over the view
+/// behind it), so the last one with something inside wins; Chromium's empty same-sized panels
+/// beside the page are passed over. Among leaves, the last one wins.
+fn topmost(has_inside: &[bool]) -> Option<usize> {
+    has_inside.iter().rposition(|inside| *inside).or_else(|| has_inside.len().checked_sub(1))
 }
 
 /// How many leading characters two strings share.
@@ -189,6 +200,17 @@ fn normalize(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_topmost_sibling_with_something_inside_is_followed() {
+        // Chromium: an empty panel, the page, then more empty panels the same size.
+        assert_eq!(topmost(&[false, true, false, false]), Some(1));
+        // An open menu (last) over a view that also has elements under the point.
+        assert_eq!(topmost(&[true, true]), Some(1));
+        // Leaves: the last one, drawn on top.
+        assert_eq!(topmost(&[false, false]), Some(1));
+        assert_eq!(topmost(&[]), None);
+    }
 
     #[test]
     fn frames_match_titles_by_their_shared_start() {
