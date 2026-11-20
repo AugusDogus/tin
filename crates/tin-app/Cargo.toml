@@ -1,0 +1,16 @@
+[package]
+name = "tin-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tin-app"
+path = "src/main.rs"
+
+[dependencies]
+tin-core = { path = "../tin-core" }
+rune = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
+
+[lints]
+workspace = true

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/tin-core", "crates/tin"]
+members = ["crates/tin-core", "crates/tin", "crates/tin-app"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,3 +14,13 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 unwrap_used = "warn"
 expect_used = "warn"
+
+# Rune is pre-release: pin a `dev` revision and patch what Rune's own workspace patches, at the
+# same revision (Rune's README, "Depending on Rune"). Update all of these together.
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
