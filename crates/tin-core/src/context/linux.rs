@@ -89,6 +89,9 @@ pub fn focused_window() -> Result<Window, String> {
         let title = output("kdotool", &["getactivewindow", "getwindowname"])?;
         return window(&Value::String(class), &Value::String(title));
     }
+    if super::cosmic::available() {
+        return super::cosmic::focused_window();
+    }
     if !wayland() && var("DISPLAY") {
         let class = output("xdotool", &["getactivewindow", "getwindowclassname"])?;
         let title = output("xdotool", &["getactivewindow", "getwindowname"])?;
@@ -97,7 +100,7 @@ pub fn focused_window() -> Result<Window, String> {
     let desktop = if desktop.is_empty() { "This Wayland desktop".to_owned() } else { desktop };
     Err(format!(
         "{desktop} doesn't tell other apps which window is focused, so the capture has no window. \
-         (Hyprland, Sway, niri, KDE with kdotool, and X11 do.)"
+         (COSMIC, Hyprland, Sway, niri, KDE with kdotool, and X11 do.)"
     ))
 }
 

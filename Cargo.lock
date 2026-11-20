@@ -817,6 +817,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 
 [[package]]
+name = "cosmic-protocols"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa7c156d3b5815830a795eb35d6bac833a72cede4861e9eda935d4ffa37415ff"
+dependencies = [
+ "bitflags 2.13.2",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wayland-scanner",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3738,6 +3752,7 @@ dependencies = [
 name = "tin-core"
 version = "0.1.0"
 dependencies = [
+ "cosmic-protocols",
  "dirs",
  "humantime",
  "lz4_flex",
@@ -3746,6 +3761,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "toml",
+ "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]

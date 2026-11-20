@@ -130,7 +130,7 @@ Each capture is one file, `~/.local/share/tin/captures/<id>.json` (macOS:
 | | Linux | macOS |
 |---|---|---|
 | Selection | primary selection (`wl-paste --primary`, `xclip`, `xsel`) | ⌘C through System Events, then the clipboard is restored |
-| Focused window | Hyprland, Sway, niri, KDE (`kdotool`), X11 (`xdotool`) | System Events |
+| Focused window | COSMIC (toplevel-info protocol), Hyprland, Sway, niri, KDE (`kdotool`), X11 (`xdotool`) | System Events |
 | Active tab | the browser's session file | the browser's AppleScript, else its session file |
 
 Tin reads Chromium-family session files (Chrome, Helium, Brave, Edge, Vivaldi, Arc, Chromium,
@@ -140,7 +140,7 @@ switch may still show the previous tab.
 
 Known limits:
 
-- Some Wayland desktops (COSMIC, GNOME) don't tell other apps which window is focused. Tin then
+- Some Wayland desktops (GNOME) don't tell other apps which window is focused. Tin then
   takes the most recently used browser's tab, marks it `"focused": false`, and shows it as
   "guessed" in the panel.
 - COSMIC doesn't share the primary selection with other apps. Copy, then double-tap Shift: the
