@@ -149,7 +149,7 @@ Each capture is one file, `~/.local/share/tin/captures/<id>.json` (macOS:
 |---|---|---|
 | Selection | primary selection (`wl-paste --primary`, `xclip`, `xsel`) | ⌘C through System Events, then the clipboard is restored |
 | Focused window | COSMIC (toplevel-info protocol), Hyprland, Sway, niri, KDE (`kdotool`), X11 (`xdotool`) | System Events |
-| Active tab | the browser's session file | the browser's AppleScript, else its session file |
+| Active tab | the page you picked, from the browser's accessibility tree; else the browser's session file (the tab titling the focused window) | the browser's AppleScript, else its session file |
 | Window picture | COSMIC (`ext-image-copy-capture`), when the window isn't a browser | not yet |
 
 Tin reads Chromium-family session files (Chrome, Helium, Brave, Edge, Vivaldi, Arc, Chromium,

@@ -438,6 +438,7 @@ fn describe_page(p: &Page) -> String {
     let via = match &p.via {
         PageSource::BrowserTab { browser, focused: true } => format!("{browser}'s tab"),
         PageSource::BrowserTab { browser, focused: false } => format!("{browser}'s last tab; window unknown"),
+        PageSource::PickedPage { app } => format!("picked in {app}"),
         PageSource::CapturedText => "from the text".to_owned(),
         PageSource::Manual => "given".to_owned(),
     };

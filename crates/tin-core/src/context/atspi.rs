@@ -40,6 +40,8 @@ pub struct Element {
     pub rect: Rect,
     pub role: String,
     pub name: Option<String>,
+    /// For a web page (a browser's document): its address and title.
+    pub page: Option<(String, Option<String>)>,
 }
 
 /// A connection to the accessibility bus.
@@ -115,6 +117,14 @@ impl Accessibility {
             .is_none_or(|words| words.first().is_some_and(|w| w >> STATE_SHOWING & 1 == 1))
     }
 
+    /// A document's address and title (Chromium and Firefox give `URI` and `Title`).
+    fn page(&self, node: &Node) -> Option<(String, Option<String>)> {
+        let attributes: std::collections::HashMap<String, String> =
+            self.call(node, "org.a11y.atspi.Document", "GetAttributes", &())?;
+        let uri = attributes.get("URI").or_else(|| attributes.get("DocURL")).filter(|u| !u.is_empty())?.clone();
+        Some((uri, attributes.get("Title").filter(|t| !t.is_empty()).cloned()))
+    }
+
     fn extents(&self, node: &Node) -> Option<Rect> {
         let (x, y, width, height): (i32, i32, i32, i32) =
             self.call(node, "org.a11y.atspi.Component", "GetExtents", &(WINDOW_COORDS,))?;
@@ -183,7 +193,9 @@ impl Accessibility {
             return Vec::new();
         };
         let Some((child, rect, below)) = explored.into_iter().nth(i) else { return Vec::new() };
-        let mut chain = vec![Element { rect, role: self.role(&child), name: self.name(&child) }];
+        let role = self.role(&child);
+        let page = role.starts_with("document").then(|| self.page(&child)).flatten();
+        let mut chain = vec![Element { rect, role, name: self.name(&child), page }];
         chain.extend(below);
         chain
     }
@@ -252,7 +264,13 @@ mod tests {
         let chain = a11y.chain_at(&frame, x, y);
         println!("chain at ({x}, {y}) in {:?}:", started.elapsed());
         for e in &chain {
-            println!("  {} {:?} {:?}", e.role, e.rect, e.name);
+            println!(
+                "  {} {:?} {:?} {:?}",
+                e.role,
+                e.rect,
+                e.name,
+                e.page.as_ref().map(|(u, _)| u.split('/').take(3).collect::<Vec<_>>().join("/"))
+            );
         }
         assert!(!chain.is_empty());
     }

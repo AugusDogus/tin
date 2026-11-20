@@ -11,6 +11,7 @@ use tin_core::Tin;
 use tin_core::capture::{Draft, Window};
 use tin_core::context;
 use tin_core::intent::Intent;
+use tin_core::page::{Page, PageSource};
 use tin_core::screenshot::Rect;
 use tin_core::snapshot::{Selection, SelectionKind, Snapshot};
 
@@ -34,6 +35,8 @@ pub struct Pick {
     pub rect: Rect,
     pub kind: SelectionKind,
     pub window: Option<Window>,
+    /// The web page picked from, as the browser described it: its address and title.
+    pub page: Option<(String, Option<String>)>,
 }
 
 pub enum Stage {
@@ -43,7 +46,7 @@ pub enum Stage {
     Selecting,
     /// The card is open: what was picked, the voice note, what it's for. `snaps` stay so Esc can
     /// go back to picking on the same frozen screens.
-    Noting { snaps: Arc<Vec<Arc<Snapshot>>>, pick: Pick, voice: Voice },
+    Noting { snaps: Arc<Vec<Arc<Snapshot>>>, pick: Box<Pick>, voice: Voice },
     /// Writing the capture; the card closes when it's done.
     Saving,
 }
@@ -86,7 +89,7 @@ impl Picker {
         }
         self.purpose = TextEdit::new("");
         self.purpose.focused = true;
-        self.stage = Stage::Noting { snaps, pick, voice };
+        self.stage = Stage::Noting { snaps, pick: Box::new(pick), voice };
     }
 
     fn picked(&mut self, snaps: Arc<Vec<Arc<Snapshot>>>, pick: Pick) {
@@ -138,12 +141,20 @@ impl Picker {
     fn save(&mut self) {
         let Ok(tin) = self.tin.clone() else { return };
         let Stage::Noting { pick, voice, .. } = std::mem::replace(&mut self.stage, Stage::Saving) else { return };
+        let pick = *pick;
         let said = self.purpose.text.clone();
         let (me, main) = (self.me.clone(), self.main.clone());
         std::thread::spawn(move || {
             let picture = pick.snap.crop(pick.rect).ok_or("the selection is empty".to_owned()).and_then(|i| i.png());
             let draft = Draft {
-                page: pick.window.as_ref().and_then(context::page_for),
+                // The page the browser said was picked; else the browser's session file.
+                page: match (pick.page, &pick.window) {
+                    (Some((url, title)), window) => {
+                        let app = window.as_ref().and_then(|w| w.app.clone()).unwrap_or_else(|| "browser".into());
+                        Some(Page::new(url, title, PageSource::PickedPage { app }))
+                    }
+                    (None, window) => window.as_ref().and_then(context::page_for),
+                },
                 window: pick.window,
                 voice: match voice {
                     Voice::Heard(note) => Some(note),
@@ -221,7 +232,7 @@ fn after_close(stage: Stage) -> (Stage, bool) {
 fn select(me: AppHandle<Picker>, main: AppHandle<Ui>, snaps: Arc<Vec<Arc<Snapshot>>>) {
     #[cfg(target_os = "linux")]
     let picked = crate::select::pick(&snaps)
-        .map(|p| p.map(|p| Pick { snap: p.snap, rect: p.rect, kind: p.kind, window: p.window }));
+        .map(|p| p.map(|p| Pick { snap: p.snap, rect: p.rect, kind: p.kind, window: p.window, page: p.page }));
     #[cfg(not(target_os = "linux"))]
     let picked: Result<Option<Pick>, String> = Err("Picking isn't built for this OS yet.".into());
     match picked {
@@ -343,8 +354,9 @@ mod tests {
             rect: Rect { x: 0, y: 0, width: 1, height: 1 },
             kind: SelectionKind::Region,
             window: None,
+            page: None,
         };
-        Stage::Noting { snaps: Arc::new(vec![snap]), pick, voice }
+        Stage::Noting { snaps: Arc::new(vec![snap]), pick: Box::new(pick), voice }
     }
 
     #[test]

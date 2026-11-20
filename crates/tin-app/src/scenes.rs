@@ -111,13 +111,14 @@ pub mod picker {
         let snap = Arc::new(snapshot());
         let w = snap.windows[0].clone();
         let pick = if pick_window {
-            Pick { snap: snap.clone(), rect: w.rect, kind: SelectionKind::Window, window: Some(w.window) }
+            Pick { snap: snap.clone(), rect: w.rect, kind: SelectionKind::Window, window: Some(w.window), page: None }
         } else {
             Pick {
                 snap: snap.clone(),
                 rect: Rect { x: 700, y: 200, width: 420, height: 260 },
                 kind: SelectionKind::Region,
                 window: None,
+                page: None,
             }
         };
         s.show(Arc::new(vec![snap]), pick, voice);

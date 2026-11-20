@@ -40,6 +40,8 @@ pub enum PageSource {
         /// it) and took the most recently used browser's tab instead.
         focused: bool,
     },
+    /// The page the user picked on screen, as the browser described it to accessibility tools.
+    PickedPage { app: String },
     /// A URL found in the captured text itself.
     CapturedText,
     /// Given explicitly (`--url`).

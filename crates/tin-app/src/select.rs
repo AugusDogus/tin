@@ -51,6 +51,8 @@ pub struct Picked {
     pub rect: Rect,
     pub kind: SelectionKind,
     pub window: Option<Window>,
+    /// The web page picked from, as the browser described it: its address and title.
+    pub page: Option<(String, Option<String>)>,
 }
 
 /// Shows the picker over every monitor and waits for a pick. `Ok(None)` is a cancel.
@@ -300,13 +302,24 @@ impl Picker {
     fn finish(&mut self, release: (usize, (f64, f64))) {
         let picked = match self.dragged() {
             Some((i, rect)) if rect.width >= 4 && rect.height >= 4 => {
-                Some(Picked { snap: self.surfaces[i].snap.clone(), rect, kind: SelectionKind::Region, window: None })
+                let snap = self.surfaces[i].snap.clone();
+                // The window and page the area was dragged over: under its centre.
+                let (cx, cy) = (rect.x + rect.width / 2, rect.y + rect.height / 2);
+                let w = snap.window_index_at(cx, cy, self.stacking_of(&snap.output).as_deref());
+                Some(Picked {
+                    window: w.map(|w| snap.windows[w].window.clone()),
+                    page: w.and_then(|w| self.page_of(&snap.output, w)),
+                    snap,
+                    rect,
+                    kind: SelectionKind::Region,
+                })
             }
             _ => {
                 let (i, _) = release;
                 let snap = self.surfaces[i].snap.clone();
                 self.hovered(i).map(|(w, item)| Picked {
                     window: Some(snap.windows[w].window.clone()),
+                    page: self.page_of(&snap.output, w),
                     snap,
                     rect: item.rect,
                     kind: item.kind,
@@ -317,6 +330,11 @@ impl Picker {
         if picked.is_some() {
             self.result = Some(picked);
         }
+    }
+
+    /// The page the element worker last saw in this window.
+    fn page_of(&self, output: &str, window: usize) -> Option<(String, Option<String>)> {
+        self.chain.as_ref().filter(|c| c.output == output && c.window == window).and_then(|c| c.page.clone())
     }
 }
 

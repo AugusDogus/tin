@@ -30,6 +30,8 @@ pub struct Chain {
     pub output: String,
     pub window: usize,
     pub items: Vec<Item>,
+    /// The web page under the point, when a browser described one: its address and title.
+    pub page: Option<(String, Option<String>)>,
 }
 
 impl Chain {
@@ -91,6 +93,7 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
         let key = (request.snap.output.clone(), request.window);
         let win = target.rect;
         let mut items = vec![Item { rect: win, label: window_label(&target.window), kind: SelectionKind::Window }];
+        let mut page = None;
 
         if let Some(a11y) = &a11y {
             let frame = frames.entry(key.clone()).or_insert_with(|| {
@@ -107,6 +110,10 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
             if let Some((node, (dx, dy))) = frame {
                 let (x, y) = (request.point.0 - win.x + *dx, request.point.1 - win.y + *dy);
                 for e in a11y.chain_at(node, x, y) {
+                    // The innermost page wins (a frame inside a page is its own page).
+                    if e.page.is_some() {
+                        page.clone_from(&e.page);
+                    }
                     let rect = Rect { x: e.rect.x - *dx + win.x, y: e.rect.y - *dy + win.y, ..e.rect };
                     // AccessKit apps (GPUI, Rune) don't answer GetRoleName: the role is empty there.
                     let role = Some(e.role).filter(|r| !r.is_empty());
@@ -132,7 +139,7 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
             }
         }
 
-        let chain = Chain { output: request.snap.output.clone(), window: request.window, items };
+        let chain = Chain { output: request.snap.output.clone(), window: request.window, items, page };
         *answer.lock().unwrap_or_else(PoisonError::into_inner) = Some(chain);
         wake();
     }
@@ -170,7 +177,12 @@ mod tests {
 
     #[test]
     fn the_default_is_the_innermost_pointable_item_and_levels_step_from_it() {
-        let chain = Chain { output: "o".into(), window: 0, items: vec![item(800, 600), item(300, 80), item(10, 8)] };
+        let chain = Chain {
+            output: "o".into(),
+            window: 0,
+            items: vec![item(800, 600), item(300, 80), item(10, 8)],
+            page: None,
+        };
         assert_eq!(chain.index(0), 1, "the 10×8 item is too small to be the default");
         assert_eq!(chain.index(1), 0);
         assert_eq!(chain.index(5), 0);
