@@ -82,6 +82,7 @@ type Frame = Option<(Node, (i32, i32))>;
 
 fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) {
     let a11y = Accessibility::connect().ok();
+    let mut log = Log::start();
     let mut frames: HashMap<(String, usize), Frame> = HashMap::new();
     let mut blocks: HashMap<(String, usize), Region> = HashMap::new();
     while let Ok(mut request) = rx.recv() {
@@ -117,6 +118,9 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
                     let rect = Rect { x: e.rect.x - *dx + win.x, y: e.rect.y - *dy + win.y, ..e.rect };
                     // AccessKit apps (GPUI, Rune) don't answer GetRoleName: the role is empty there.
                     let role = Some(e.role).filter(|r| !r.is_empty());
+                    if !meaningful(role.as_deref(), e.name.as_deref()) {
+                        continue;
+                    }
                     let label = match (&role, &e.name) {
                         (Some(role), Some(name)) => format!("{role}: {name}"),
                         (Some(only), None) | (None, Some(only)) => only.clone(),
@@ -140,9 +144,73 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
         }
 
         let chain = Chain { output: request.snap.output.clone(), window: request.window, items, page };
+        log.write(&request, &chain, a11y.is_some());
         *answer.lock().unwrap_or_else(PoisonError::into_inner) = Some(chain);
         wake();
     }
+}
+
+/// What each hover found, for working out why something can't be picked: `picker.log` in Tin's
+/// data folder, started afresh each time the picker opens. Holds window titles and the names of
+/// elements hovered (which can be page text); it never leaves the machine.
+struct Log(Option<std::fs::File>);
+
+impl Log {
+    fn start() -> Log {
+        let path = tin_core::Paths::from_env().data.join("picker.log");
+        Log(std::fs::File::create(path).ok())
+    }
+
+    fn write(&mut self, request: &Request, chain: &Chain, accessibility: bool) {
+        use std::io::Write;
+        let Some(file) = &mut self.0 else { return };
+        let window = request.snap.windows.get(request.window).map(|w| window_label(&w.window)).unwrap_or_default();
+        let source = if !accessibility {
+            "no accessibility bus"
+        } else if chain.items.iter().skip(1).any(|i| {
+            matches!(
+                i.kind,
+                SelectionKind::Element { role: Some(_), .. } | SelectionKind::Element { name: Some(_), .. }
+            )
+        }) {
+            "accessibility"
+        } else {
+            "pixels"
+        };
+        let _ = writeln!(
+            file,
+            "{} {:?} in {window:?} via {source}, page {:?}",
+            request.snap.output,
+            request.point,
+            chain.page.as_ref().map(|(u, _)| u)
+        );
+        for item in &chain.items {
+            let r = item.rect;
+            let _ = writeln!(file, "    {} {}×{} at {},{}", item.label, r.width, r.height, r.x, r.y);
+        }
+    }
+}
+
+/// Roles that only group or lay out other elements. Pages nest dozens of them (X puts a tweet
+/// under twenty unnamed sections), so stepping in and out stops only on named ones.
+const GENERIC_ROLES: [&str; 11] = [
+    "section",
+    "panel",
+    "filler",
+    "unknown",
+    "redundant object",
+    "grouping",
+    "static",
+    "layered pane",
+    "scroll pane",
+    "viewport",
+    "generic",
+];
+
+/// Whether an element is worth stopping on: it has a name, or a role that means something
+/// (an article, link, button, heading, list item, image, landmark, page…).
+fn meaningful(role: Option<&str>, name: Option<&str>) -> bool {
+    name.is_some_and(|n| !n.trim().is_empty()) || role.is_some_and(|r| !GENERIC_ROLES.contains(&r))
 }
 
 /// Adds an item inside the window, skipping repeats of the one before (toolkits nest
@@ -188,6 +256,17 @@ mod tests {
         assert_eq!(chain.index(5), 0);
         assert_eq!(chain.index(-1), 2);
         assert_eq!(chain.index(-9), 2);
+    }
+
+    #[test]
+    fn unnamed_containers_are_skipped_and_named_or_meaningful_elements_kept() {
+        assert!(!meaningful(Some("section"), None));
+        assert!(!meaningful(Some("panel"), Some("  ")));
+        assert!(!meaningful(None, None));
+        assert!(meaningful(Some("article"), None), "a tweet");
+        assert!(meaningful(Some("section"), Some("Timeline: Your Home Timeline")));
+        assert!(meaningful(Some("static"), Some("21 hours ago")));
+        assert!(meaningful(None, Some("Send")), "AccessKit apps report no role names");
     }
 
     #[test]
