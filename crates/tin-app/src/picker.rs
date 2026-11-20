@@ -44,9 +44,8 @@ pub enum Stage {
     Idle,
     /// Freezing the monitors, or waiting for a pick on them.
     Selecting,
-    /// The card is open: what was picked, the voice note, what it's for. `snaps` stay so Esc can
-    /// go back to picking on the same frozen screens.
-    Noting { snaps: Arc<Vec<Arc<Snapshot>>>, pick: Box<Pick>, voice: Voice },
+    /// The card is open: what was picked, the voice note, what it's for.
+    Noting { pick: Box<Pick>, voice: Voice },
     /// Writing the capture; the card closes when it's done.
     Saving,
 }
@@ -83,17 +82,17 @@ impl Picker {
     }
 
     /// Opens the card for a pick (also the headless scenes' way in).
-    pub fn show(&mut self, snaps: Arc<Vec<Arc<Snapshot>>>, pick: Pick, voice: Voice) {
+    pub fn show(&mut self, pick: Pick, voice: Voice) {
         if let Some(image) = pick.snap.crop(pick.rect) {
             self.thumbnail.set(image.width, image.height, image.rgba);
         }
         self.purpose = TextEdit::new("");
         self.purpose.focused = true;
-        self.stage = Stage::Noting { snaps, pick: Box::new(pick), voice };
+        self.stage = Stage::Noting { pick: Box::new(pick), voice };
     }
 
-    fn picked(&mut self, snaps: Arc<Vec<Arc<Snapshot>>>, pick: Pick) {
-        self.show(snaps, pick, Voice::Starting);
+    fn picked(&mut self, pick: Pick) {
+        self.show(pick, Voice::Starting);
         let Ok(tin) = &self.tin else { return };
         let (hex, me) = (tin.hex(), self.me.clone());
         std::thread::spawn(move || {
@@ -184,22 +183,15 @@ impl Picker {
         });
     }
 
-    /// Esc: drop the note and pick again on the same frozen screens.
-    fn back(&mut self, tx: &mut Tx) {
-        let Stage::Noting { snaps, voice, .. } = std::mem::replace(&mut self.stage, Stage::Selecting) else {
-            return;
-        };
-        if matches!(voice, Voice::Starting | Voice::Recording) {
-            self.cancel_hex();
-        }
+    /// Esc: throw the capture away (Hex stops, nothing is saved) and close the card.
+    fn discard(&mut self, tx: &mut Tx) {
+        self.closed();
         tx.close_window();
-        let (me, main) = (self.me.clone(), self.main.clone());
-        std::thread::spawn(move || select(me, main, snaps));
     }
 
-    /// The card closed some other way than saving or Esc (its close button, the compositor):
-    /// throw the note away and make sure Hex isn't left recording. Saving and Esc move the stage
-    /// on before they close the window, so they never get here with a note.
+    /// The card closed without saving (Esc, its close button, the compositor): throw the note
+    /// away and make sure Hex isn't left recording. Saving moves the stage on before it closes
+    /// the window, so it never gets here with a note.
     pub fn closed(&mut self) {
         let (stage, cancel) = after_close(std::mem::replace(&mut self.stage, Stage::Idle));
         self.stage = stage;
@@ -219,7 +211,7 @@ impl Picker {
 }
 
 /// What a closing card leaves behind, and whether Hex must stop recording. Only a showing note
-/// is dropped; picking again and saving move on before they close the window. A transcription
+/// is dropped; saving moves on before it closes the window. A transcription
 /// already under way finishes, but its result finds no note and is dropped.
 fn after_close(stage: Stage) -> (Stage, bool) {
     match stage {
@@ -237,7 +229,7 @@ fn select(me: AppHandle<Picker>, main: AppHandle<Ui>, snaps: Arc<Vec<Arc<Snapsho
     let picked: Result<Option<Pick>, String> = Err("Picking isn't built for this OS yet.".into());
     match picked {
         Ok(Some(pick)) => {
-            me.update(move |s, _| s.picked(snaps, pick));
+            me.update(move |s, _| s.picked(pick));
             me.open();
         }
         Ok(None) => me.update(|s, _| s.stage = Stage::Idle),
@@ -254,7 +246,7 @@ fn fail(me: &AppHandle<Picker>, main: &AppHandle<Ui>, error: String) {
 pub fn on_key(s: &mut Picker, ev: &KeyEvent, tx: &mut Tx) -> bool {
     match ev.key {
         Key::Escape => {
-            s.back(tx);
+            s.discard(tx);
             true
         }
         Key::Enter => {
@@ -304,7 +296,15 @@ pub fn view(s: &Picker, cx: &mut Cx<Picker>) -> El {
         .caret(accent, accent.alpha(0.3))
         .placeholder("What's it for? (optional)", t.text_secondary)
         .on_edit(|s: &mut Picker| &mut s.purpose)
-        .on_submit(|s: &mut Picker, _| s.finish());
+        .on_submit(|s: &mut Picker, _| s.finish())
+        // A focused field would otherwise take the first Esc to drop its focus.
+        .on_input_key(|s: &mut Picker, ev: &KeyEvent, tx: &mut Tx| {
+            let discard = ev.key == Key::Escape;
+            if discard {
+                s.discard(tx);
+            }
+            discard
+        });
     col()
         .key("card")
         .w_full()
@@ -331,9 +331,7 @@ pub fn view(s: &Picker, cx: &mut Cx<Picker>) -> El {
         )
         .child(purpose)
         .child(
-            row()
-                .child(text("Enter saves · Esc picks again").font(type_::LABEL).color(t.text_secondary))
-                .child(spacer()),
+            row().child(text("Enter saves · Esc discards").font(type_::LABEL).color(t.text_secondary)).child(spacer()),
         )
 }
 
@@ -356,7 +354,7 @@ mod tests {
             window: None,
             page: None,
         };
-        Stage::Noting { snaps: Arc::new(vec![snap]), pick: Box::new(pick), voice }
+        Stage::Noting { pick: Box::new(pick), voice }
     }
 
     #[test]

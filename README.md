@@ -33,7 +33,7 @@ monitor and dims them:
 - A small card opens with what you picked, and Hex starts listening. Say what it's about; type
   what it's for if you like.
 - **Enter** saves (the cropped picture, your transcript, the window, and the page if it's a
-  browser). **Esc** drops the note and goes back to picking on the same frozen screens.
+  browser). **Esc** throws the capture away.
 
 Two quick taps of the same Shift do it; typing a capital or holding Shift never does. Turn it off
 with `[app] double_shift = false`. On Linux it reads the keyboard from `/dev/input`, so you need

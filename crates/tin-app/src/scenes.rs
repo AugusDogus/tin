@@ -121,7 +121,7 @@ pub mod picker {
                 page: None,
             }
         };
-        s.show(Arc::new(vec![snap]), pick, voice);
+        s.show(pick, voice);
     }
 
     fn noting(s: &mut Picker) {
