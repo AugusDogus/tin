@@ -21,8 +21,10 @@ pub enum SnssError {
     NoNavigations,
 }
 
-/// The tab the user last activated, from a whole session file's bytes.
-pub fn active_tab(data: &[u8]) -> Result<Tab, SnssError> {
+/// The tab in front, from a whole session file's bytes: the one whose title starts the focused
+/// window's title when that's known (each window shows its own tab, so with several windows the
+/// last tab activated may be in another one), else the tab activated last.
+pub fn active_tab(data: &[u8], window_title: Option<&str>) -> Result<Tab, SnssError> {
     if data.get(..4) != Some(b"SNSS".as_slice()) {
         return Err(SnssError::NotSnss);
     }
@@ -81,12 +83,20 @@ pub fn active_tab(data: &[u8]) -> Result<Tab, SnssError> {
             .and_then(|i| navigations.get(&(tab, *i)))
             .or_else(|| latest_navigation.get(&tab).and_then(|i| navigations.get(&(tab, *i))))
     };
-    let front = last_active
-        .iter()
-        .filter(|(tab, _)| !closed.contains(tab))
-        .filter_map(|(tab, time)| tab_navigation(*tab).map(|nav| (*time, nav)))
-        .max_by_key(|(time, _)| *time)
-        .map(|(_, nav)| nav);
+    let open: Vec<(i64, &Tab)> = latest_navigation
+        .keys()
+        .filter(|tab| !closed.contains(tab))
+        .filter_map(|tab| tab_navigation(*tab).map(|nav| (last_active.get(tab).copied().unwrap_or(i64::MIN), nav)))
+        .collect();
+    let titled = window_title.and_then(|window| {
+        open.iter()
+            .filter(|(_, nav)| nav.title.as_deref().is_some_and(|t| super::titles_window(t, window)))
+            .max_by_key(|(time, nav)| (nav.title.as_ref().map_or(0, String::len), *time))
+            .map(|(_, nav)| *nav)
+    });
+    let front = titled.or_else(|| {
+        open.iter().filter(|(time, _)| *time != i64::MIN).max_by_key(|(time, _)| *time).map(|(_, nav)| *nav)
+    });
     front.or_else(|| last_written.and_then(|key| navigations.get(&key))).cloned().ok_or(SnssError::NoNavigations)
 }
 
@@ -233,7 +243,26 @@ pub(crate) mod tests {
             .selected(1, 0)
             .active(2, 100)
             .active(1, 200);
-        assert_eq!(active_tab(snss.bytes()), Ok(tab("https://a.com/", "A")));
+        assert_eq!(active_tab(snss.bytes(), None), Ok(tab("https://a.com/", "A")));
+    }
+
+    #[test]
+    fn the_focused_windows_tab_wins_over_one_activated_later_elsewhere() {
+        // Two windows: Twitch in one, X activated after it in the other. The focused window is
+        // titled after Twitch.
+        let snss = Snss::new()
+            .navigation(1, 0, "https://twitch.tv/ludwig", "Ludwig - Twitch")
+            .navigation(2, 0, "https://x.com/home", "(1) Home / X")
+            .active(1, 100)
+            .active(2, 200);
+        assert_eq!(
+            active_tab(snss.bytes(), Some("Ludwig - Twitch - Helium")),
+            Ok(tab("https://twitch.tv/ludwig", "Ludwig - Twitch"))
+        );
+        assert_eq!(
+            active_tab(snss.bytes(), Some("Something else - Helium")),
+            Ok(tab("https://x.com/home", "(1) Home / X"))
+        );
     }
 
     #[test]
@@ -244,21 +273,21 @@ pub(crate) mod tests {
             .active(1, 100)
             .active(2, 200)
             .closed(2);
-        assert_eq!(active_tab(snss.bytes()), Ok(tab("https://a.com/", "A")));
+        assert_eq!(active_tab(snss.bytes(), None), Ok(tab("https://a.com/", "A")));
     }
 
     #[test]
     fn without_active_times_the_last_navigation_written_wins() {
         let snss = Snss::new().navigation(1, 0, "https://a.com/", "A").navigation(2, 0, "https://b.com/", "B");
-        assert_eq!(active_tab(snss.bytes()), Ok(tab("https://b.com/", "B")));
+        assert_eq!(active_tab(snss.bytes(), None), Ok(tab("https://b.com/", "B")));
     }
 
     #[test]
     fn a_torn_tail_is_ignored_and_garbage_is_refused() {
         let mut bytes = Snss::new().navigation(1, 0, "https://a.com/", "A").bytes().to_vec();
         bytes.extend([0xff, 0x00, 6, 1, 2]);
-        assert_eq!(active_tab(&bytes), Ok(tab("https://a.com/", "A")));
-        assert_eq!(active_tab(b"nope"), Err(SnssError::NotSnss));
-        assert_eq!(active_tab(Snss::new().bytes()), Err(SnssError::NoNavigations));
+        assert_eq!(active_tab(&bytes, None), Ok(tab("https://a.com/", "A")));
+        assert_eq!(active_tab(b"nope", None), Err(SnssError::NotSnss));
+        assert_eq!(active_tab(Snss::new().bytes(), None), Err(SnssError::NoNavigations));
     }
 }

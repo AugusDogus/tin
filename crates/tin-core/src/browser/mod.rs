@@ -85,6 +85,23 @@ pub enum BrowserError {
     Unreadable { browser: &'static str, path: PathBuf, reason: String },
 }
 
+/// Whether a tab with this title is what a window with this title shows: browsers title their
+/// windows "<tab title> - <browser>", sometimes with a profile name between, and some insert
+/// invisible characters.
+fn titles_window(tab: &str, window: &str) -> bool {
+    let clean = |s: &str| -> String {
+        s.chars()
+            .filter(|c| !matches!(c, '\u{200b}'..='\u{200f}' | '\u{2060}' | '\u{feff}'))
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let (tab, window) = (clean(tab), clean(window));
+    tab.chars().count() >= 3
+        && (window == tab || window.starts_with(&format!("{tab} - ")) || window.starts_with(&format!("{tab} — ")))
+}
+
 /// True when a window's app id or title names a browser Tin can read.
 pub fn is_browser_window(app: &str) -> bool {
     hinted(app).is_some()
@@ -102,7 +119,7 @@ fn hinted(app: &str) -> Option<&'static Known> {
 }
 
 /// The active tab of the most recently used browser, or of the one `window_app` names.
-pub fn active_tab(window_app: Option<&str>) -> Result<BrowserTab, BrowserError> {
+pub fn active_tab(window_app: Option<&str>, window_title: Option<&str>) -> Result<BrowserTab, BrowserError> {
     let preferred = window_app.and_then(hinted);
     let browsers: Vec<&Known> = match preferred {
         Some(k) => vec![k],
@@ -118,8 +135,8 @@ pub fn active_tab(window_app: Option<&str>) -> Result<BrowserTab, BrowserError> 
     let unreadable = |reason: String| BrowserError::Unreadable { browser: known.name, path: path.clone(), reason };
     let data = fs::read(&path).map_err(|e| unreadable(e.to_string()))?;
     let tab = match known.engine {
-        Engine::Chromium => chromium::active_tab(&data).map_err(|e| unreadable(e.to_string()))?,
-        Engine::Firefox => firefox::active_tab(&data).map_err(|e| unreadable(e.to_string()))?,
+        Engine::Chromium => chromium::active_tab(&data, window_title).map_err(|e| unreadable(e.to_string()))?,
+        Engine::Firefox => firefox::active_tab(&data, window_title).map_err(|e| unreadable(e.to_string()))?,
     };
     Ok(BrowserTab { browser: known.name, tab, written })
 }
@@ -173,5 +190,13 @@ mod tests {
         assert!(is_browser_window("org.mozilla.firefox"));
         assert!(!is_browser_window("com.mitchellh.ghostty"));
         assert!(!is_browser_window("org.gnome.Search"));
+    }
+
+    #[test]
+    fn a_tab_titles_a_window_up_to_the_browsers_suffix() {
+        assert!(titles_window("Ludwig - Twitch", "Ludwig - Twitch - Helium"));
+        assert!(titles_window("Page", "Page - Profile 1 - Microsoft\u{200b} Edge"));
+        assert!(titles_window("Docs", "Docs — Mozilla Firefox"));
+        assert!(!titles_window("(1) Home / X", "Ludwig - Twitch - Helium"));
     }
 }

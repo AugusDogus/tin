@@ -13,6 +13,8 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use crate::capture::Window;
 use crate::screenshot::Rect;
 
+/// AT-SPI's `ATSPI_STATE_SHOWING` bit: the element is on screen.
+const STATE_SHOWING: u32 = 25;
 /// AT-SPI's `ATSPI_COORD_TYPE_WINDOW`: relative to the window.
 const WINDOW_COORDS: u32 = 1;
 /// How long one call may take. A frozen app mustn't freeze the picker.
@@ -106,6 +108,13 @@ impl Accessibility {
         self.call::<_, String>(node, "org.a11y.atspi.Accessible", "GetRoleName", &()).unwrap_or_default()
     }
 
+    /// Whether the element is on screen (AT-SPI's SHOWING state). An app that doesn't answer is
+    /// taken at its word that the element exists.
+    fn showing(&self, node: &Node) -> bool {
+        self.call::<_, Vec<u32>>(node, "org.a11y.atspi.Accessible", "GetState", &())
+            .is_none_or(|words| words.first().is_some_and(|w| w >> STATE_SHOWING & 1 == 1))
+    }
+
     fn extents(&self, node: &Node) -> Option<Rect> {
         let (x, y, width, height): (i32, i32, i32, i32) =
             self.call(node, "org.a11y.atspi.Component", "GetExtents", &(WINDOW_COORDS,))?;
@@ -155,7 +164,11 @@ impl Accessibility {
                 break;
             }
             *budget -= 1;
-            if let Some(r) = self.extents(&child).filter(|r| r.contains(x, y)) {
+            // Toolkits keep hidden views in the tree (Chromium has hidden containers over the
+            // page); only what's showing can be under the pointer.
+            if let Some(r) = self.extents(&child).filter(|r| r.contains(x, y))
+                && self.showing(&child)
+            {
                 under.push((child, r));
             }
         }

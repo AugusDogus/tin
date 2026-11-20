@@ -57,12 +57,27 @@ pub fn decompress(data: &[u8]) -> Result<Vec<u8>, MozError> {
     Ok(lz4_flex::block::decompress_size_prepended(rest)?)
 }
 
-pub fn active_tab(data: &[u8]) -> Result<Tab, MozError> {
+/// A window's selected tab's current entry (Firefox counts from 1).
+fn front(window: &Window) -> Option<&Entry> {
+    let tab = window.tabs.get(window.selected.saturating_sub(1))?;
+    tab.entries.get(tab.index.saturating_sub(1)).or(tab.entries.last())
+}
+
+/// The tab in front: each window's selected tab, preferring the one whose title starts the
+/// focused window's title when that's known, else the selected window's.
+pub fn active_tab(data: &[u8], window_title: Option<&str>) -> Result<Tab, MozError> {
     let session: Session = serde_json::from_slice(&decompress(data)?)?;
     let nth = |n: usize| n.saturating_sub(1);
-    let window = session.windows.get(nth(session.selected_window)).ok_or(MozError::NoSelectedTab)?;
-    let tab = window.tabs.get(nth(window.selected)).ok_or(MozError::NoSelectedTab)?;
-    let entry = tab.entries.get(nth(tab.index)).or(tab.entries.last()).ok_or(MozError::NoSelectedTab)?;
+    let titled = window_title.and_then(|title| {
+        session
+            .windows
+            .iter()
+            .filter_map(front)
+            .find(|e| e.title.as_deref().is_some_and(|t| super::titles_window(t, title)))
+    });
+    let entry = titled
+        .or_else(|| session.windows.get(nth(session.selected_window)).and_then(front))
+        .ok_or(MozError::NoSelectedTab)?;
     Ok(Tab { url: entry.url.clone(), title: entry.title.clone().filter(|t| !t.is_empty()) })
 }
 
@@ -85,12 +100,12 @@ mod tests {
                 {"index": 1, "entries": [{"url": "https://yes.com/", "title": "Yes"}, {"url": "https://fwd.com/"}]}
             ]}
         ]}"#;
-        let tab = active_tab(&mozlz4(json)).ok();
+        let tab = active_tab(&mozlz4(json), None).ok();
         assert_eq!(tab, Some(Tab { url: "https://yes.com/".into(), title: Some("Yes".into()) }));
     }
 
     #[test]
     fn refuses_files_without_the_header() {
-        assert!(matches!(active_tab(b"{}"), Err(MozError::NotMozLz4)));
+        assert!(matches!(active_tab(b"{}", None), Err(MozError::NotMozLz4)));
     }
 }

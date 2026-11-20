@@ -141,7 +141,7 @@ fn page(window: Option<&Window>, text: Option<&CapturedText>, notes: &mut Vec<No
         Some(app) if browser::is_browser_window(app) => {
             let scripted = platform::browser_tab(app).map_err(&mut note).ok().flatten();
             let tab = scripted.or_else(|| {
-                browser::active_tab(Some(app))
+                browser::active_tab(Some(app), window.and_then(|w| w.title.as_deref()))
                     .map_err(|e| note(e.to_string()))
                     .ok()
                     .map(|t| (t.browser.to_owned(), t.tab))
@@ -151,7 +151,7 @@ fn page(window: Option<&Window>, text: Option<&CapturedText>, notes: &mut Vec<No
         }
         // A non-browser window is in front: only a URL in the text itself is the page.
         Some(_) => from_text(),
-        None => match browser::active_tab(None) {
+        None => match browser::active_tab(None, None) {
             // `focused: false` tells the reader this is a guess.
             Ok(t) => Some(Page::new(
                 t.tab.url,
