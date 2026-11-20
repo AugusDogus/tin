@@ -62,6 +62,16 @@ impl Store {
         Ok(path)
     }
 
+    /// Writes a capture's window picture beside its JSON, as `<id>.png`.
+    pub fn save_screenshot(&self, id: &CaptureId, png: &[u8]) -> Result<PathBuf, StoreError> {
+        let path = self.dir.join(format!("{id}.png"));
+        let tmp = self.dir.join(format!(".{id}.png.tmp"));
+        let io = |source| StoreError::Io { action: "write", path: path.clone(), source };
+        fs::write(&tmp, png).map_err(io)?;
+        fs::rename(&tmp, &path).map_err(io)?;
+        Ok(path)
+    }
+
     pub fn load(&self, id: &CaptureId) -> Result<Capture, StoreError> {
         let path = self.path(id);
         let bytes = fs::read(&path).map_err(|source| match source.kind() {
@@ -71,7 +81,15 @@ impl Store {
         serde_json::from_slice(&bytes).map_err(|source| StoreError::Corrupt { path, source })
     }
 
+    /// Deletes the capture and its window picture, if it has one.
     pub fn remove(&self, id: &CaptureId) -> Result<(), StoreError> {
+        let png = self.dir.join(format!("{id}.png"));
+        match fs::remove_file(&png) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(StoreError::Io { action: "remove", path: png, source: e });
+            }
+            _ => {}
+        }
         let path = self.path(id);
         fs::remove_file(&path).map_err(|source| match source.kind() {
             std::io::ErrorKind::NotFound => StoreError::NotFound(id.to_string()),

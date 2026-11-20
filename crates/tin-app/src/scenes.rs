@@ -23,6 +23,7 @@ fn composer(s: &mut Ui) {
             PageSource::BrowserTab { browser: "Helium".into(), focused: false },
         )),
         window: None,
+        screenshot: None,
         notes: Vec::new(),
     });
     s.purpose = TextEdit::new("ask blog about this #pricing");

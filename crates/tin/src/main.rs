@@ -85,6 +85,9 @@ struct CaptureArgs {
     /// Don't attach the browser's active tab.
     #[arg(long)]
     no_page: bool,
+    /// Attach a picture of the focused window when it isn't a browser (COSMIC for now).
+    #[arg(long)]
+    screenshot: bool,
     /// Print the saved capture as JSON.
     #[arg(long)]
     json: bool,
@@ -194,7 +197,7 @@ fn capture(args: CaptureArgs) -> Outcome {
         _ => TextGrab::Selection,
     };
     let page_wanted = !args.no_page && args.url.is_none();
-    let gathered = context::gather(Options { text: text_grab, page: page_wanted });
+    let gathered = context::gather(Options { text: text_grab, page: page_wanted, screenshot: args.screenshot });
     // A missing window is routine on some desktops; say so only in `tin context`.
     warn_all(gathered.notes.iter().filter(|n| n.part != Part::Window).map(|n| n.message.clone()));
 
@@ -219,6 +222,7 @@ fn capture(args: CaptureArgs) -> Outcome {
         window: gathered.window,
         voice,
         note: args.note,
+        screenshot: gathered.screenshot,
         intent: Intent { said: args.purpose, ..Intent::default() },
     };
     let saved = tin.save(draft).map_err(|e| e.to_string())?;
@@ -405,6 +409,9 @@ fn print_capture(c: &Capture, file: &str) {
     }
     if let Some(n) = &c.note {
         println!("  note    {n}");
+    }
+    if let Some(s) = &c.screenshot {
+        println!("  picture {} ({}×{})", s.path.display(), s.width, s.height);
     }
     if let Some(w) = &c.window {
         let w = [w.app.as_deref(), w.title.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" — ");

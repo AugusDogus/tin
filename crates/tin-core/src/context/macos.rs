@@ -16,7 +16,12 @@ fn osascript(lang: &str, script: &str) -> Result<String, String> {
     }
 }
 
-pub fn focused_window() -> Result<Window, String> {
+/// macOS window pictures aren't wired up yet.
+pub fn focused(_want_screenshot: impl FnOnce(&Window) -> bool) -> Result<super::Focus, String> {
+    focused_window().map(|window| super::Focus { window, screenshot: None })
+}
+
+fn focused_window() -> Result<Window, String> {
     let app = osascript(
         "AppleScript",
         r#"tell application "System Events" to get name of first application process whose frontmost is true"#,

@@ -19,6 +19,7 @@ use macos as platform;
 use crate::browser;
 use crate::capture::{CapturedText, TextSource, Window};
 use crate::page::{Page, PageSource};
+use crate::screenshot::Screenshot;
 
 /// Which text to grab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,12 +38,22 @@ pub enum TextGrab {
 pub struct Options {
     pub text: TextGrab,
     pub page: bool,
+    /// A picture of the focused window, when it isn't a browser (the page stands for those).
+    pub screenshot: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { text: TextGrab::Selection, page: true }
+        Options { text: TextGrab::Selection, page: true, screenshot: false }
     }
+}
+
+/// The focused window, and its picture when one was asked for: `None` when it wasn't taken
+/// (not asked, or the desktop can't), `Some(Err)` when taking it failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Focus {
+    pub window: Window,
+    pub screenshot: Option<Result<Screenshot, String>>,
 }
 
 /// What Tin found, plus a note for each part it couldn't get and why.
@@ -51,6 +62,7 @@ pub struct Gathered {
     pub text: Option<CapturedText>,
     pub window: Option<Window>,
     pub page: Option<Page>,
+    pub screenshot: Option<Screenshot>,
     pub notes: Vec<Note>,
 }
 
@@ -67,13 +79,24 @@ pub enum Part {
     Text,
     Window,
     Page,
+    Screenshot,
 }
 
 /// Reads the screen's context. Never fails: each missing part leaves a note instead.
 pub fn gather(options: Options) -> Gathered {
     let mut notes = Vec::new();
     // The window first: grabbing the selection on macOS sends ⌘C to it.
-    let window = platform::focused_window().map_err(|message| notes.push(Note { part: Part::Window, message })).ok();
+    let want_screenshot = |w: &Window| options.screenshot && !w.app.as_deref().is_some_and(browser::is_browser_window);
+    let focus =
+        platform::focused(want_screenshot).map_err(|message| notes.push(Note { part: Part::Window, message })).ok();
+    let (window, screenshot) = match focus {
+        Some(Focus { window, screenshot }) => {
+            let shot =
+                screenshot.and_then(|r| r.map_err(|message| notes.push(Note { part: Part::Screenshot, message })).ok());
+            (Some(window), shot)
+        }
+        None => (None, None),
+    };
 
     let read = |grab: TextGrab| match grab {
         TextGrab::Selection => (platform::selection(), TextSource::Selection),
@@ -104,7 +127,7 @@ pub fn gather(options: Options) -> Gathered {
     }
 
     let page = if options.page { page(window.as_ref(), text.as_ref(), &mut notes) } else { None };
-    Gathered { text, window, page, notes }
+    Gathered { text, window, page, screenshot, notes }
 }
 
 fn page(window: Option<&Window>, text: Option<&CapturedText>, notes: &mut Vec<Note>) -> Option<Page> {

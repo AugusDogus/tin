@@ -28,6 +28,7 @@ pub struct Composer {
     pub text_from: Option<TextSource>,
     pub page: Option<Page>,
     pub window: Option<Window>,
+    pub screenshot: Option<tin_core::screenshot::Screenshot>,
     pub voice: Voice,
     /// Why parts of the context are missing.
     pub notes: Vec<String>,
@@ -118,7 +119,7 @@ impl Ui {
     pub fn start_capture(&self, grab: TextGrab, activation_token: Option<String>) {
         let me = self.me.clone();
         std::thread::spawn(move || {
-            let gathered = context::gather(Options { text: grab, page: true });
+            let gathered = context::gather(Options { text: grab, page: true, screenshot: true });
             me.update(move |s, _| s.begin(gathered));
             match activation_token {
                 Some(token) => me.activate(token),
@@ -129,7 +130,7 @@ impl Ui {
 
     pub fn begin(&mut self, gathered: Gathered) {
         self.cancel_recording();
-        let Gathered { text, window, page, notes } = gathered;
+        let Gathered { text, window, page, screenshot, notes } = gathered;
         self.draft_text = TextEdit::new(text.as_ref().map_or("", |t| t.text.as_str()));
         self.purpose = TextEdit::new("");
         self.purpose.focused = true;
@@ -137,6 +138,7 @@ impl Ui {
             text_from: text.map(|t| t.from),
             page,
             window,
+            screenshot,
             voice: Voice::Idle,
             notes: notes.into_iter().filter(|n| n.part != context::Part::Window).map(|n| n.message).collect(),
         });
@@ -173,6 +175,7 @@ impl Ui {
                 _ => None,
             },
             note: None,
+            screenshot: composer.screenshot.clone(),
             intent: Intent { said: Some(self.purpose.text.clone()), ..Intent::default() },
         };
         match tin.save(draft) {

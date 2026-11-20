@@ -12,12 +12,13 @@ pub mod hex;
 pub mod hook;
 pub mod intent;
 pub mod page;
+pub mod screenshot;
 pub mod store;
 
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use capture::{Capture, CaptureId, Draft, EmptyCapture, Status};
+use capture::{Capture, CaptureId, Draft, EmptyCapture, ScreenshotFile, Status};
 use config::{Config, ConfigError};
 use hex::Hex;
 use hook::HookError;
@@ -100,7 +101,12 @@ impl Tin {
     pub fn save(&self, mut draft: Draft) -> Result<Saved, SaveError> {
         let said = draft.intent.said.take();
         draft.intent = self.routes.resolve(said.as_deref(), draft.voice.as_ref().map(|v| v.transcript.as_str()));
-        let capture = Capture::new(draft, SystemTime::now())?;
+        let shot = draft.screenshot.take();
+        let mut capture = Capture::new(draft, SystemTime::now())?;
+        if let Some(shot) = shot {
+            let path = self.store.save_screenshot(&capture.id, &shot.png)?;
+            capture.screenshot = Some(ScreenshotFile { path, width: shot.width, height: shot.height });
+        }
         let file = self.store.save(&capture)?;
         let hook_errors = self.run_hooks(&capture, &file);
         Ok(Saved { capture, file, hook_errors })

@@ -67,7 +67,15 @@ pub fn browser_tab(_app: &str) -> Result<Option<(String, crate::browser::Tab)>, 
     Ok(None)
 }
 
-pub fn focused_window() -> Result<Window, String> {
+pub fn focused(want_screenshot: impl FnOnce(&Window) -> bool) -> Result<super::Focus, String> {
+    if super::cosmic::available() {
+        return super::cosmic::focused(want_screenshot);
+    }
+    // Only COSMIC's window capture is wired up so far.
+    focused_window().map(|window| super::Focus { window, screenshot: None })
+}
+
+fn focused_window() -> Result<Window, String> {
     let var = |k: &str| env::var_os(k).is_some();
     let desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
     if var("HYPRLAND_INSTANCE_SIGNATURE") {
@@ -88,9 +96,6 @@ pub fn focused_window() -> Result<Window, String> {
         let class = output("kdotool", &["getactivewindow", "getwindowclassname"])?;
         let title = output("kdotool", &["getactivewindow", "getwindowname"])?;
         return window(&Value::String(class), &Value::String(title));
-    }
-    if super::cosmic::available() {
-        return super::cosmic::focused_window();
     }
     if !wayland() && var("DISPLAY") {
         let class = output("xdotool", &["getactivewindow", "getwindowclassname"])?;

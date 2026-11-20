@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::intent::Intent;
 use crate::page::Page;
+use crate::screenshot::Screenshot;
 
 /// One saved capture. Stored as `<id>.json`; this is the schema agents read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,7 +26,18 @@ pub struct Capture {
     /// A typed note, separate from the captured text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// A picture of the focused window, when it wasn't a browser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<ScreenshotFile>,
     pub intent: Intent,
+}
+
+/// A capture's window picture: a PNG beside its JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenshotFile {
+    pub path: std::path::PathBuf,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Open captures are the to-do list; done ones are checked off.
@@ -78,6 +90,7 @@ pub struct Draft {
     pub window: Option<Window>,
     pub voice: Option<VoiceNote>,
     pub note: Option<String>,
+    pub screenshot: Option<Screenshot>,
     pub intent: Intent,
 }
 
@@ -114,6 +127,8 @@ impl Capture {
             window: draft.window.filter(|w| w.app.is_some() || w.title.is_some()),
             voice: draft.voice.filter(|v| !v.transcript.trim().is_empty()),
             note: blank(draft.note),
+            // The store writes the picture and fills this in (`Tin::save`).
+            screenshot: None,
             intent: draft.intent,
         })
     }

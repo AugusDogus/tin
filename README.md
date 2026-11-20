@@ -111,6 +111,8 @@ Each capture is one file, `~/.local/share/tin/captures/<id>.json` (macOS:
     "via": { "type": "browser_tab", "browser": "Helium", "focused": true }
   },
   "voice": { "transcript": "Compare with our onboarding queue.", "engine": "hex" },
+  "screenshot": { "path": "/home/me/.local/share/tin/captures/20261120-184741-820-bdd9.png",
+                  "width": 1920, "height": 984 },
   "intent": {
     "said": "ask blog about this",
     "target": { "type": "project", "name": "blog", "path": "/home/me/dev/blog", "matched": "ask blog" },
@@ -132,6 +134,7 @@ Each capture is one file, `~/.local/share/tin/captures/<id>.json` (macOS:
 | Selection | primary selection (`wl-paste --primary`, `xclip`, `xsel`) | ⌘C through System Events, then the clipboard is restored |
 | Focused window | COSMIC (toplevel-info protocol), Hyprland, Sway, niri, KDE (`kdotool`), X11 (`xdotool`) | System Events |
 | Active tab | the browser's session file | the browser's AppleScript, else its session file |
+| Window picture | COSMIC (`ext-image-copy-capture`), when the window isn't a browser | not yet |
 
 Tin reads Chromium-family session files (Chrome, Helium, Brave, Edge, Vivaldi, Arc, Chromium,
 Thorium) and Firefox-family session stores (Firefox, Zen, LibreWolf). No extension is needed.
