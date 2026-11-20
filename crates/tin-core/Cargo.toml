@@ -22,3 +22,4 @@ workspace = true
 cosmic-protocols = { version = "0.2.0", default-features = false, features = ["client"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
+zbus = { version = "5.19", default-features = false, features = ["blocking-api", "async-io"] }

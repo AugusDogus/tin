@@ -9,6 +9,8 @@
 #[cfg(target_os = "linux")]
 mod canvas;
 mod double_tap;
+#[cfg(target_os = "linux")]
+mod elements;
 mod ipc;
 mod keys;
 mod picker;
@@ -143,6 +145,13 @@ fn run(launch: Launch) -> std::process::ExitCode {
     if let Launch::Capture = launch {
         capture();
     }
+    // Apps decide at launch whether to publish their elements, so switch accessibility on early.
+    #[cfg(target_os = "linux")]
+    std::thread::spawn(|| {
+        if let Err(e) = tin_core::context::atspi::enable() {
+            eprintln!("tin-app: {e}; picking elements inside windows falls back to their pixels.");
+        }
+    });
     register_shortcut(&main_handle, capture.clone());
     watch_double_shift(&main_handle, capture);
     rune::run_windows(move |_| -> Vec<rune::AnyWindowSpec> {

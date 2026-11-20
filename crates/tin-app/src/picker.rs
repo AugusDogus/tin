@@ -67,9 +67,15 @@ impl Picker {
         }
         self.stage = Stage::Selecting;
         let (me, main) = (self.me.clone(), self.main.clone());
-        std::thread::spawn(move || match context::snapshots() {
-            Ok(snaps) => select(me, main, Arc::new(snaps.into_iter().map(Arc::new).collect())),
-            Err(e) => fail(&me, &main, e),
+        std::thread::spawn(move || {
+            // Something in the session can switch accessibility off again; apps only publish
+            // their elements while it's on.
+            #[cfg(target_os = "linux")]
+            let _ = context::atspi::enable();
+            match context::snapshots() {
+                Ok(snaps) => select(me, main, Arc::new(snaps.into_iter().map(Arc::new).collect())),
+                Err(e) => fail(&me, &main, e),
+            }
         });
     }
 

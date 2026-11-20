@@ -40,6 +40,14 @@ pub struct Selection {
 pub enum SelectionKind {
     /// A whole window, clicked.
     Window,
+    /// Something inside a window, clicked: from the app's accessibility tree (with its role and
+    /// name) or found in the pixels (neither).
+    Element {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
     /// An area, dragged.
     Region,
 }
@@ -53,8 +61,17 @@ impl Snapshot {
     /// The window under a point: the focused one if it's there, else the smallest that contains
     /// it (dialogs and popups sit over the bigger windows they belong to).
     pub fn window_at(&self, x: i32, y: i32) -> Option<&SnapWindow> {
-        let under: Vec<&SnapWindow> = self.windows.iter().filter(|w| w.rect.contains(x, y)).collect();
-        under.iter().find(|w| w.focused).or_else(|| under.iter().min_by_key(|w| w.rect.area())).copied()
+        self.window_index_at(x, y).map(|i| &self.windows[i])
+    }
+
+    /// [`Snapshot::window_at`]'s index in `windows`.
+    pub fn window_index_at(&self, x: i32, y: i32) -> Option<usize> {
+        let under: Vec<usize> = (0..self.windows.len()).filter(|&i| self.windows[i].rect.contains(x, y)).collect();
+        under
+            .iter()
+            .copied()
+            .find(|&i| self.windows[i].focused)
+            .or_else(|| under.iter().copied().min_by_key(|&i| self.windows[i].rect.area()))
     }
 
     /// The pixels inside `rect` (points from the monitor's top-left).

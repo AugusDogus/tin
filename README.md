@@ -27,8 +27,9 @@ running (`hex start`).
 With `tin-app` running (`tin-app --background` at login), **double-tap Shift**. Tin freezes every
 monitor and dims them:
 
-- **Click** a window to capture it, or **drag** an area, on any monitor. The window under the
-  cursor lights up wherever the cursor goes. **Esc** closes.
+- The element under the cursor lights up, on any monitor: a button, a message, a panel, or the
+  whole window. **Scroll up** to grow it to what's around it, **down** to shrink it. **Click**
+  picks it; **drag** picks an area instead. **Esc** closes.
 - A small card opens with what you picked, and Hex starts listening. Say what it's about; type
   what it's for if you like.
 - **Enter** saves (the cropped picture, your transcript, the window, and the page if it's a
@@ -38,7 +39,11 @@ Two quick taps of the same Shift do it; typing a capital or holding Shift never 
 with `[app] double_shift = false`. On Linux it reads the keyboard from `/dev/input`, so you need
 to be in the `input` group (`sudo usermod -aG input $USER`, then log in again). On macOS it needs
 Accessibility permission. Tin only looks at Shift and "some other key"; it keeps nothing you type.
-The picker needs COSMIC for now: it reads windows and the screens through COSMIC's protocols,
+Elements come from the app's accessibility tree when it publishes one (GTK, Qt, Firefox;
+Chromium and Electron apps started with `--force-renderer-accessibility`), with their role and
+name saved in the capture. Tin switches the session's accessibility bus on when it starts and
+before each pick. Anything else (terminals, games, apps that publish nothing) is cut into
+blocks from its pixels. The picker needs COSMIC for now: it reads windows and the screens through COSMIC's protocols,
 without a portal or prompt, and draws over each monitor with a layer-shell surface. macOS isn't
 built yet.
 

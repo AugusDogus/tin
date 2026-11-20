@@ -3804,6 +3804,7 @@ dependencies = [
  "toml",
  "wayland-client",
  "wayland-protocols",
+ "zbus",
 ]
 
 [[package]]

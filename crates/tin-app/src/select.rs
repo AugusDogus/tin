@@ -1,9 +1,10 @@
 //! Picking a window or an area on frozen monitors (Linux, Wayland layer shell).
 //!
 //! One overlay surface covers each monitor and shows what it showed when the picker opened,
-//! dimmed. The window under the pointer lights up on whichever monitor the pointer is on; a click
-//! picks it, a drag picks an area, Escape cancels. Rune's own overlays can't take pointer input on
-//! Wayland, so these surfaces are drawn here in software.
+//! dimmed. The element under the pointer lights up on whichever monitor the pointer is on (see
+//! `elements.rs`); the scroll wheel grows or shrinks it, a click picks it, a drag picks an area,
+//! Escape cancels. Rune's own overlays can't take pointer input on Wayland, so these surfaces are
+//! drawn here in software.
 
 use std::sync::Arc;
 
@@ -30,16 +31,17 @@ use tin_core::capture::Window;
 use tin_core::screenshot::Rect;
 use tin_core::snapshot::{SelectionKind, Snapshot};
 use wayland_client::globals::registry_queue_init;
-use wayland_client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
-use wayland_client::{Connection, QueueHandle};
+use wayland_client::protocol::{wl_callback, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
+use wayland_client::{Connection, Dispatch, QueueHandle};
 
 use crate::canvas::{Backdrop, Canvas, Rgba};
+use crate::elements::{Chain, Finder, Item};
 
 /// A drag shorter than this (points) is a click.
 const CLICK_SLOP: f64 = 6.0;
 const BTN_LEFT: u32 = 0x110;
 const ACCENT: Rgba = Rgba(64, 196, 120, 255);
-const HINT: &str = "Click a window or drag an area  ·  Esc to cancel";
+const HINT: &str = "Click to pick  ·  Scroll to grow or shrink  ·  Drag an area  ·  Esc to cancel";
 
 /// What the user picked.
 pub struct Picked {
@@ -60,6 +62,12 @@ pub fn pick(snaps: &[Arc<Snapshot>]) -> Result<Option<Picked>, String> {
     let layer_shell = LayerShell::bind(&globals, &qh).map_err(|e| fail("layer shell", &e))?;
     let shm = Shm::bind(&globals, &qh).map_err(|e| fail("wl_shm", &e))?;
     let pool = SlotPool::new(1920 * 1080 * 4, &shm).map_err(|e| fail("shared memory", &e))?;
+    // The element worker wakes this loop with a sync callback when it has an answer.
+    let (wake_conn, wake_qh) = (conn.clone(), qh.clone());
+    let finder = Finder::spawn(move || {
+        wake_conn.display().sync(&wake_qh, ());
+        let _ = wake_conn.flush();
+    });
     let mut picker = Picker {
         registry: RegistryState::new(&globals),
         seats: SeatState::new(&globals, &qh),
@@ -74,6 +82,9 @@ pub fn pick(snaps: &[Arc<Snapshot>]) -> Result<Option<Picked>, String> {
         at: None,
         press: None,
         result: None,
+        finder,
+        chain: None,
+        level: 0,
     };
     // Outputs' names, to match each snapshot to its monitor.
     queue.roundtrip(&mut picker).map_err(|e| fail("outputs", &e))?;
@@ -152,6 +163,11 @@ struct Picker {
     press: Option<(usize, (f64, f64))>,
     /// Set once the user picks or cancels.
     result: Option<Option<Picked>>,
+    finder: Finder,
+    /// The newest answer about what's under the pointer.
+    chain: Option<Chain>,
+    /// Scroll steps out (positive) or in (negative) from the default element.
+    level: i32,
 }
 
 impl Picker {
@@ -165,18 +181,47 @@ impl Picker {
         (i == j && moved).then(|| (i, Rect::between(round(start), round(now))))
     }
 
-    fn frame_for(&self, i: usize) -> Frame {
+    /// What's lit under the pointer on surface `i`: the chosen element when the worker has
+    /// answered for this window, else the window itself.
+    fn hovered(&self, i: usize) -> Option<(usize, Item)> {
+        let (p, point) = self.at?;
+        if p != i {
+            return None;
+        }
         let snap = &self.surfaces[i].snap;
-        let highlight = match (self.dragged(), self.at) {
-            (Some((d, rect)), _) => (d == i).then(|| (rect, format!("{} × {}", rect.width, rect.height))),
-            (None, Some((p, point))) if p == i => {
-                let (x, y) = round(point);
-                snap.window_at(x, y).map(|w| (w.rect, label(&w.window)))
+        let (x, y) = round(point);
+        let w = snap.window_index_at(x, y)?;
+        match &self.chain {
+            Some(chain) if chain.output == snap.output && chain.window == w => {
+                chain.items.get(chain.index(self.level)).map(|item| (w, item.clone()))
             }
-            _ => None,
+            _ => {
+                let target = &snap.windows[w];
+                Some((w, Item { rect: target.rect, label: label(&target.window), kind: SelectionKind::Window }))
+            }
+        }
+    }
+
+    fn frame_for(&self, i: usize) -> Frame {
+        let highlight = match self.dragged() {
+            Some((d, rect)) => (d == i).then(|| (rect, format!("{} × {}", rect.width, rect.height))),
+            None => self.hovered(i).map(|(_, item)| (item.rect, item.label)),
         };
         let hint = self.at.map_or(i == 0, |(p, _)| p == i);
         Frame { highlight, hint }
+    }
+
+    /// Asks the worker what's under the pointer.
+    fn look(&self) {
+        if self.press.is_some() {
+            return;
+        }
+        let Some((i, point)) = self.at else { return };
+        let snap = &self.surfaces[i].snap;
+        let (x, y) = round(point);
+        if let Some(w) = snap.window_index_at(x, y) {
+            self.finder.ask(snap.clone(), w, (x, y));
+        }
     }
 
     fn redraw_all(&mut self, qh: &QueueHandle<Self>) {
@@ -232,11 +277,14 @@ impl Picker {
                 Some(Picked { snap: self.surfaces[i].snap.clone(), rect, kind: SelectionKind::Region, window: None })
             }
             _ => {
-                let (i, point) = release;
+                let (i, _) = release;
                 let snap = self.surfaces[i].snap.clone();
-                let (x, y) = round(point);
-                let window = snap.window_at(x, y).cloned();
-                window.map(|w| Picked { snap, rect: w.rect, kind: SelectionKind::Window, window: Some(w.window) })
+                self.hovered(i).map(|(w, item)| Picked {
+                    window: Some(snap.windows[w].window.clone()),
+                    snap,
+                    rect: item.rect,
+                    kind: item.kind,
+                })
             }
         };
         self.press = None;
@@ -252,6 +300,26 @@ fn round((x, y): (f64, f64)) -> (i32, i32) {
 
 fn label(w: &Window) -> String {
     w.title.clone().or_else(|| w.app.clone()).unwrap_or_else(|| "Window".into())
+}
+
+/// The element worker's wake-up: take its answer and redraw.
+impl Dispatch<wl_callback::WlCallback, ()> for Picker {
+    fn event(
+        state: &mut Self,
+        _: &wl_callback::WlCallback,
+        _: wl_callback::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let Some(chain) = state.finder.take() else { return };
+        let innermost = |c: &Chain| (c.output.clone(), c.window, c.items.last().map(|i| i.rect));
+        if state.chain.as_ref().map(innermost) != Some(innermost(&chain)) {
+            state.level = 0;
+        }
+        state.chain = Some(chain);
+        state.redraw_all(qh);
+    }
 }
 
 impl LayerShellHandler for Picker {
@@ -300,13 +368,28 @@ impl PointerHandler for Picker {
                         let _ = p.set_cursor(conn, CursorIcon::Crosshair);
                     }
                     self.at = Some((i, event.position));
+                    self.look();
                 }
                 PointerEventKind::Leave { .. } => {
                     if self.at.is_some_and(|(p, _)| p == i) {
                         self.at = None;
                     }
                 }
-                PointerEventKind::Motion { .. } => self.at = Some((i, event.position)),
+                PointerEventKind::Motion { .. } => {
+                    self.at = Some((i, event.position));
+                    self.look();
+                }
+                PointerEventKind::Axis { vertical, .. } => {
+                    let step = if vertical.discrete != 0 {
+                        vertical.discrete.signum()
+                    } else {
+                        vertical.absolute.signum() as i32
+                    };
+                    // Scrolling up grows the highlight to what's around it; down shrinks it.
+                    self.level -= step;
+                    let len = self.chain.as_ref().map_or(1, |c| c.items.len()) as i32;
+                    self.level = self.level.clamp(-len, len);
+                }
                 PointerEventKind::Press { button: BTN_LEFT, .. } => self.press = Some((i, event.position)),
                 PointerEventKind::Release { button: BTN_LEFT, .. } => {
                     self.at = Some((i, event.position));

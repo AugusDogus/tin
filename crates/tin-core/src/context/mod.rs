@@ -4,6 +4,8 @@
 compile_error!("Tin reads screen context on Linux and macOS only.");
 
 #[cfg(target_os = "linux")]
+pub mod atspi;
+#[cfg(target_os = "linux")]
 mod cosmic;
 #[cfg(target_os = "linux")]
 mod linux;
