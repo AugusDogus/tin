@@ -21,6 +21,11 @@ pub fn focused(_want_screenshot: impl FnOnce(&Window) -> bool) -> Result<super::
     focused_window().map(|window| super::Focus { window, screenshot: None })
 }
 
+/// Not built yet on macOS.
+pub fn window_pictures(_snap: &crate::snapshot::Snapshot) -> Result<Vec<Option<crate::screenshot::Image>>, String> {
+    Err("Working out which window is on top isn't built for macOS yet.".into())
+}
+
 /// Not built yet on macOS, where `screencapture -i` is the native picker.
 pub fn snapshots() -> Result<Vec<crate::snapshot::Snapshot>, String> {
     Err("Picking a window or region isn't built for macOS yet.".into())

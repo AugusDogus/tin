@@ -177,6 +177,11 @@ pub fn snapshots() -> Result<Vec<crate::snapshot::Snapshot>, String> {
     platform::snapshots()
 }
 
+/// Pictures of a snapshot's overlapping windows, for [`crate::snapshot::Snapshot::stacking`].
+pub fn window_pictures(snap: &crate::snapshot::Snapshot) -> Result<Vec<Option<crate::screenshot::Image>>, String> {
+    platform::window_pictures(snap)
+}
+
 /// Puts text on the system clipboard.
 pub fn copy(text: &str) -> Result<(), String> {
     platform::copy(text)

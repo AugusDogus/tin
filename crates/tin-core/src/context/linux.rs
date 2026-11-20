@@ -75,6 +75,13 @@ pub fn focused(want_screenshot: impl FnOnce(&Window) -> bool) -> Result<super::F
     focused_window().map(|window| super::Focus { window, screenshot: None })
 }
 
+pub fn window_pictures(snap: &crate::snapshot::Snapshot) -> Result<Vec<Option<crate::screenshot::Image>>, String> {
+    if super::cosmic::available() {
+        return super::cosmic::window_pictures(snap);
+    }
+    Err("Working out which window is on top needs COSMIC for now.".into())
+}
+
 pub fn snapshots() -> Result<Vec<crate::snapshot::Snapshot>, String> {
     if super::cosmic::available() {
         return super::cosmic::snapshots();

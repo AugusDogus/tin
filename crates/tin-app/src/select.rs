@@ -6,7 +6,8 @@
 //! Escape cancels. Rune's own overlays can't take pointer input on Wayland, so these surfaces are
 //! drawn here in software.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ab_glyph::FontVec;
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
@@ -62,12 +63,29 @@ pub fn pick(snaps: &[Arc<Snapshot>]) -> Result<Option<Picked>, String> {
     let layer_shell = LayerShell::bind(&globals, &qh).map_err(|e| fail("layer shell", &e))?;
     let shm = Shm::bind(&globals, &qh).map_err(|e| fail("wl_shm", &e))?;
     let pool = SlotPool::new(1920 * 1080 * 4, &shm).map_err(|e| fail("shared memory", &e))?;
-    // The element worker wakes this loop with a sync callback when it has an answer.
-    let (wake_conn, wake_qh) = (conn.clone(), qh.clone());
-    let finder = Finder::spawn(move || {
-        wake_conn.display().sync(&wake_qh, ());
-        let _ = wake_conn.flush();
-    });
+    // Workers wake this loop with a sync callback when they have something new.
+    let wake = {
+        let (conn, qh) = (conn.clone(), qh.clone());
+        move || {
+            conn.display().sync(&qh, ());
+            let _ = conn.flush();
+        }
+    };
+    let finder = Finder::spawn(wake.clone());
+    // COSMIC doesn't say which window is on top; work it out from pictures of each window.
+    let stacking: Arc<Mutex<HashMap<String, Vec<i32>>>> = Arc::default();
+    {
+        let (stacking, snaps, wake) = (stacking.clone(), snaps.to_vec(), wake);
+        std::thread::spawn(move || {
+            for snap in snaps {
+                if let Ok(pictures) = tin_core::context::window_pictures(&snap) {
+                    let z = snap.stacking(&pictures);
+                    stacking.lock().unwrap_or_else(PoisonError::into_inner).insert(snap.output.clone(), z);
+                    wake();
+                }
+            }
+        });
+    }
     let mut picker = Picker {
         registry: RegistryState::new(&globals),
         seats: SeatState::new(&globals, &qh),
@@ -83,6 +101,7 @@ pub fn pick(snaps: &[Arc<Snapshot>]) -> Result<Option<Picked>, String> {
         press: None,
         result: None,
         finder,
+        stacking: stacking.clone(),
         chain: None,
         level: 0,
     };
@@ -164,6 +183,8 @@ struct Picker {
     /// Set once the user picks or cancels.
     result: Option<Option<Picked>>,
     finder: Finder,
+    /// Each monitor's window stacking (see `Snapshot::stacking`), filled in by a worker.
+    stacking: Arc<Mutex<HashMap<String, Vec<i32>>>>,
     /// The newest answer about what's under the pointer.
     chain: Option<Chain>,
     /// Scroll steps out (positive) or in (negative) from the default element.
@@ -190,7 +211,7 @@ impl Picker {
         }
         let snap = &self.surfaces[i].snap;
         let (x, y) = round(point);
-        let w = snap.window_index_at(x, y)?;
+        let w = snap.window_index_at(x, y, self.stacking_of(&snap.output).as_deref())?;
         match &self.chain {
             Some(chain) if chain.output == snap.output && chain.window == w => {
                 chain.items.get(chain.index(self.level)).map(|item| (w, item.clone()))
@@ -211,6 +232,11 @@ impl Picker {
         Frame { highlight, hint }
     }
 
+    /// Which window is over which on a monitor, once the stacking worker has worked it out.
+    fn stacking_of(&self, output: &str) -> Option<Vec<i32>> {
+        self.stacking.lock().unwrap_or_else(PoisonError::into_inner).get(output).cloned()
+    }
+
     /// Asks the worker what's under the pointer.
     fn look(&self) {
         if self.press.is_some() {
@@ -219,7 +245,7 @@ impl Picker {
         let Some((i, point)) = self.at else { return };
         let snap = &self.surfaces[i].snap;
         let (x, y) = round(point);
-        if let Some(w) = snap.window_index_at(x, y) {
+        if let Some(w) = snap.window_index_at(x, y, self.stacking_of(&snap.output).as_deref()) {
             self.finder.ask(snap.clone(), w, (x, y));
         }
     }
@@ -312,12 +338,18 @@ impl Dispatch<wl_callback::WlCallback, ()> for Picker {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        let Some(chain) = state.finder.take() else { return };
-        let innermost = |c: &Chain| (c.output.clone(), c.window, c.items.last().map(|i| i.rect));
-        if state.chain.as_ref().map(innermost) != Some(innermost(&chain)) {
-            state.level = 0;
+        // Either the element worker answered, or the stacking worker learned which window is on
+        // top (then the window under the pointer may be another one: ask again).
+        match state.finder.take() {
+            Some(chain) => {
+                let innermost = |c: &Chain| (c.output.clone(), c.window, c.items.last().map(|i| i.rect));
+                if state.chain.as_ref().map(innermost) != Some(innermost(&chain)) {
+                    state.level = 0;
+                }
+                state.chain = Some(chain);
+            }
+            None => state.look(),
         }
-        state.chain = Some(chain);
         state.redraw_all(qh);
     }
 }

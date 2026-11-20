@@ -58,20 +58,84 @@ impl Snapshot {
         if self.bounds.width > 0 { f64::from(self.image.width) / f64::from(self.bounds.width) } else { 1.0 }
     }
 
-    /// The window under a point: the focused one if it's there, else the smallest that contains
-    /// it (dialogs and popups sit over the bigger windows they belong to).
-    pub fn window_at(&self, x: i32, y: i32) -> Option<&SnapWindow> {
-        self.window_index_at(x, y).map(|i| &self.windows[i])
+    /// The window under a point, by `stacking` (from [`Snapshot::stacking`]) when known: the
+    /// highest window there. Without it, a guess: the focused one, else the smallest (dialogs
+    /// sit over the bigger windows they belong to).
+    pub fn window_at(&self, x: i32, y: i32, stacking: Option<&[i32]>) -> Option<&SnapWindow> {
+        self.window_index_at(x, y, stacking).map(|i| &self.windows[i])
     }
 
     /// [`Snapshot::window_at`]'s index in `windows`.
-    pub fn window_index_at(&self, x: i32, y: i32) -> Option<usize> {
+    pub fn window_index_at(&self, x: i32, y: i32, stacking: Option<&[i32]>) -> Option<usize> {
         let under: Vec<usize> = (0..self.windows.len()).filter(|&i| self.windows[i].rect.contains(x, y)).collect();
+        if let Some(z) = stacking.filter(|z| z.len() == self.windows.len()) {
+            return under
+                .iter()
+                .copied()
+                .max_by_key(|&i| (z[i], self.windows[i].focused, -self.windows[i].rect.area()));
+        }
         under
             .iter()
             .copied()
             .find(|&i| self.windows[i].focused)
             .or_else(|| under.iter().copied().min_by_key(|&i| self.windows[i].rect.area()))
+    }
+
+    /// How high each window sits, from pictures of each window on its own (`None` where there
+    /// is none): where two windows overlap, the one whose own pixels match what the monitor
+    /// showed there is on top. A window's number counts the windows it's over.
+    pub fn stacking(&self, pictures: &[Option<Image>]) -> Vec<i32> {
+        let mut z = vec![0; self.windows.len()];
+        for a in 0..self.windows.len() {
+            for b in a + 1..self.windows.len() {
+                let (Some(pa), Some(pb)) =
+                    (pictures.get(a).and_then(Option::as_ref), pictures.get(b).and_then(Option::as_ref))
+                else {
+                    continue;
+                };
+                let Some(overlap) = self.windows[a].rect.clamp_to(self.windows[b].rect) else { continue };
+                let (ma, mb) = (self.matches(a, pa, overlap), self.matches(b, pb, overlap));
+                match ma.cmp(&mb) {
+                    std::cmp::Ordering::Greater => z[a] += 1,
+                    std::cmp::Ordering::Less => z[b] += 1,
+                    std::cmp::Ordering::Equal => {}
+                }
+            }
+        }
+        z
+    }
+
+    /// At how many sample points of `area` window `i`'s own picture matches the monitor.
+    fn matches(&self, i: usize, picture: &Image, area: Rect) -> usize {
+        let scale = self.scale();
+        let rect = self.windows[i].rect.scaled(scale);
+        // A picture can include client-side shadows around the window: centre it on the window.
+        let dx = ((picture.width as i32 - rect.width) / 2).max(0);
+        let dy = ((picture.height as i32 - rect.height) - dx).max(0);
+        let area = area.scaled(scale);
+        let pixel = |image: &Image, x: i32, y: i32| -> Option<[u8; 3]> {
+            if x < 0 || y < 0 || x >= image.width as i32 || y >= image.height as i32 {
+                return None;
+            }
+            let k = (y as usize * image.width as usize + x as usize) * 4;
+            image.rgba.get(k..k + 3).map(|p| [p[0], p[1], p[2]])
+        };
+        const GRID: i32 = 16;
+        let mut count = 0;
+        for gy in 0..GRID {
+            for gx in 0..GRID {
+                let x = area.x + (2 * gx + 1) * area.width / (2 * GRID);
+                let y = area.y + (2 * gy + 1) * area.height / (2 * GRID);
+                let shown = pixel(&self.image, x, y);
+                let own = pixel(picture, x - rect.x + dx, y - rect.y + dy);
+                if let (Some(s), Some(o)) = (shown, own)
+                    && (0..3).all(|c| s[c].abs_diff(o[c]) <= 24)
+                {
+                    count += 1;
+                }
+            }
+        }
+        count
     }
 
     /// The pixels inside `rect` (points from the monitor's top-left).
@@ -103,11 +167,33 @@ mod tests {
         let big = Rect { x: 0, y: 0, width: 100, height: 100 };
         let dialog = Rect { x: 10, y: 10, width: 20, height: 20 };
         let s = snapshot(vec![window("editor", big, false), window("dialog", dialog, false)]);
-        assert_eq!(s.window_at(15, 15).and_then(|w| w.window.app.as_deref()), Some("dialog"));
-        assert_eq!(s.window_at(50, 50).and_then(|w| w.window.app.as_deref()), Some("editor"));
+        assert_eq!(s.window_at(15, 15, None).and_then(|w| w.window.app.as_deref()), Some("dialog"));
+        assert_eq!(s.window_at(50, 50, None).and_then(|w| w.window.app.as_deref()), Some("editor"));
         let s = snapshot(vec![window("editor", big, true), window("dialog", dialog, false)]);
-        assert_eq!(s.window_at(15, 15).and_then(|w| w.window.app.as_deref()), Some("editor"));
-        assert!(s.window_at(500, 500).is_none());
+        assert_eq!(s.window_at(15, 15, None).and_then(|w| w.window.app.as_deref()), Some("editor"));
+        assert!(s.window_at(500, 500, None).is_none());
+    }
+
+    #[test]
+    fn stacking_puts_the_window_whose_pixels_show_on_top() {
+        // A 4×4 monitor: a big grey window everywhere, and a small one behind it (its own
+        // picture is red, but the monitor shows grey over it).
+        let grey = |w: u32, h: u32| Image { width: w, height: h, rgba: [90, 90, 90, 255].repeat((w * h) as usize) };
+        let red = |w: u32, h: u32| Image { width: w, height: h, rgba: [200, 0, 0, 255].repeat((w * h) as usize) };
+        let big = Rect { x: 0, y: 0, width: 4, height: 4 };
+        let small = Rect { x: 1, y: 1, width: 2, height: 2 };
+        let s = Snapshot {
+            output: "DP-1".into(),
+            bounds: big,
+            image: grey(4, 4),
+            windows: vec![window("helium", big, false), window("teams", small, true)],
+        };
+        let z = s.stacking(&[Some(grey(4, 4)), Some(red(2, 2))]);
+        assert_eq!(z, [1, 0]);
+        // With the order known, the covered (and even focused) small window loses.
+        assert_eq!(s.window_at(2, 2, Some(&z)).and_then(|w| w.window.app.as_deref()), Some("helium"));
+        // Without it, the guess picks the focused one.
+        assert_eq!(s.window_at(2, 2, None).and_then(|w| w.window.app.as_deref()), Some("teams"));
     }
 
     #[test]

@@ -99,6 +99,39 @@ pub fn snapshots() -> Result<Vec<Snapshot>, String> {
         .collect()
 }
 
+/// Pictures of a snapshot's windows that overlap another window, each as its app draws it,
+/// even where it's covered (`None` for the rest, or where it can't be found or taken). For
+/// [`Snapshot::stacking`].
+pub fn window_pictures(snap: &Snapshot) -> Result<Vec<Option<Image>>, String> {
+    let mut desktop = Desktop::connect()?;
+    let output = desktop
+        .state
+        .outputs
+        .iter()
+        .find(|o| o.name.as_deref() == Some(snap.output.as_str()))
+        .map(|o| o.wl.id())
+        .ok_or("that monitor isn't connected anymore")?;
+    let overlaps = |i: usize| {
+        let r = snap.windows[i].rect;
+        snap.windows.iter().enumerate().any(|(j, w)| j != i && r.clamp_to(w.rect).is_some())
+    };
+    let handles: Vec<Option<toplevel_v1::ExtForeignToplevelHandleV1>> = (0..snap.windows.len())
+        .map(|i| {
+            let w = &snap.windows[i];
+            overlaps(i)
+                .then(|| {
+                    desktop.state.toplevels.iter().find(|t| {
+                        t.app_id == w.window.app
+                            && t.title == w.window.title
+                            && t.geometry.iter().any(|(o, r)| *o == output && *r == w.rect)
+                    })
+                })?
+                .map(|t| t.handle.clone())
+        })
+        .collect();
+    Ok(handles.iter().map(|h| h.as_ref().and_then(|h| desktop.capture(Source::Toplevel(h)).ok())).collect())
+}
+
 enum Source<'a> {
     Toplevel(&'a toplevel_v1::ExtForeignToplevelHandleV1),
     Output(&'a wl_output::WlOutput),
@@ -581,6 +614,15 @@ mod tests {
 
         let started = std::time::Instant::now();
         let snaps = super::snapshots().unwrap_or_else(|e| panic!("{e}"));
+        for snap in &snaps {
+            let started = std::time::Instant::now();
+            let pictures = super::window_pictures(snap).unwrap_or_else(|e| panic!("{e}"));
+            let z = snap.stacking(&pictures);
+            println!("{}: {} pictures in {:?}", snap.output, pictures.iter().flatten().count(), started.elapsed());
+            for (w, z) in snap.windows.iter().zip(&z) {
+                println!("  z={z} {:?} {:?}", w.window.app, w.rect);
+            }
+        }
         println!("froze {} monitors in {:?}", snaps.len(), started.elapsed());
         for snap in &snaps {
             let png = snap.image.png().unwrap_or_else(|e| panic!("{e}"));
