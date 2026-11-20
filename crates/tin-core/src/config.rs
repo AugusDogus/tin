@@ -59,6 +59,9 @@ pub struct AppConfig {
     /// The global shortcut Tin's window registers, such as `ctrl+alt+c`.
     #[serde(default)]
     pub shortcut: Option<String>,
+    /// Double-tap Shift to capture, as in Copper. On unless set to false.
+    #[serde(default)]
+    pub double_shift: Option<bool>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -91,6 +94,7 @@ pub const STARTER: &str = r#"# Tin's config. Routes let you say what a capture i
 # bin = "hex"
 
 # [app]
+# double_shift = true          # double-tap Shift to capture
 # shortcut = "ctrl+alt+c"
 "#;
 
@@ -114,6 +118,10 @@ impl Config {
                 .filter(|p| p.is_dir())
                 .collect(),
         }
+    }
+
+    pub fn double_shift(&self) -> bool {
+        self.app.double_shift.unwrap_or(true)
     }
 
     pub fn hex_bin(&self) -> &str {
@@ -146,6 +154,7 @@ mod tests {
         assert_eq!(config.routes.len(), 2);
         assert_eq!(config.routes[0].aliases, ["ask blog", "blog.com"]);
         assert_eq!(config.app.shortcut.as_deref(), Some("ctrl+alt+c"));
+        assert!(config.double_shift());
     }
 
     #[test]

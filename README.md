@@ -24,8 +24,15 @@ running (`hex start`).
 
 ## Capture
 
-Bind **`tin-app --capture`** to a key in your desktop's keyboard settings (COSMIC, GNOME and KDE
-all take custom shortcuts). It reads the selection and the page, then opens the capture panel:
+With `tin-app` running (`tin-app --background` at login), **double-tap Shift**. Tin reads the
+selection (or, if nothing is selected, the clipboard) and the page, then opens the capture panel.
+Two quick taps of the same Shift do it; typing a capital or holding Shift never does. Turn it off
+with `[app] double_shift = false`. On Linux it reads the keyboard from `/dev/input`, so you need
+to be in the `input` group (`sudo usermod -aG input $USER`, then log in again). On macOS it needs
+Accessibility permission. Tin only looks at Shift and "some other key"; it keeps nothing you type.
+
+You can also bind **`tin-app --capture`** to a key in your desktop's keyboard settings. The
+capture panel has:
 
 - **Text**: the selection, editable. If nothing came through, paste it in.
 - **Page**: the browser's active tab, as a link or a tweet. ✕ drops it.
@@ -36,7 +43,7 @@ all take custom shortcuts). It reads the selection and the page, then opens the 
 
 You can also set `[app] shortcut = "ctrl+alt+c"` in the config to have the running app register a
 global shortcut itself. That works on macOS, X11 and Wayland desktops with the GlobalShortcuts
-portal. Run `tin-app --background` at login to keep it ready.
+portal.
 
 The window lists open captures. Click the circle to check one off, double-click (or select it and
 press ⌘C / Ctrl+C) to copy it with its URL, and use the field at the bottom to queue a note or
@@ -136,8 +143,8 @@ Known limits:
 - Some Wayland desktops (COSMIC, GNOME) don't tell other apps which window is focused. Tin then
   takes the most recently used browser's tab, marks it `"focused": false`, and shows it as
   "guessed" in the panel.
-- COSMIC doesn't share the primary selection with other apps. Copy, then capture (the panel's
-  text field, `Capture clipboard`, or `tin capture --clipboard`).
+- COSMIC doesn't share the primary selection with other apps. Copy, then double-tap Shift: the
+  app falls back to the clipboard and labels the text "from the clipboard".
 - macOS needs Accessibility (and Automation, for browsers) permission for Tin or your terminal.
 
 ## Development

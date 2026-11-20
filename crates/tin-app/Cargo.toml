@@ -14,3 +14,9 @@ rune = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef
 
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+rdev = "0.5.3"

@@ -6,7 +6,9 @@
 
 #![forbid(unsafe_code)]
 
+mod double_tap;
 mod ipc;
+mod keys;
 mod scenes;
 mod ui;
 mod view;
@@ -94,7 +96,7 @@ fn run(launch: Launch) -> std::process::ExitCode {
     if let Err(e) = ipc::listen(move |m: Message| {
         let token = m.activation_token;
         match m.request {
-            Request::Capture => on_message.update(move |s, _| s.start_capture(TextGrab::Selection, token)),
+            Request::Capture => on_message.update(move |s, _| s.start_capture(TextGrab::SelectionOrClipboard, token)),
             Request::Show => match token {
                 Some(token) => on_message.activate(token),
                 None => on_message.open(),
@@ -108,11 +110,28 @@ fn run(launch: Launch) -> std::process::ExitCode {
     }
 
     if let Launch::Capture = launch {
-        handle.update(|s, _| s.start_capture(TextGrab::Selection, None));
+        handle.update(|s, _| s.start_capture(TextGrab::SelectionOrClipboard, None));
     }
     register_shortcut(&handle);
+    watch_double_shift(&handle);
     app.run();
     std::process::ExitCode::SUCCESS
+}
+
+/// Double-tap Shift to capture, unless `[app] double_shift = false`.
+fn watch_double_shift(handle: &rune::AppHandle<Ui>) {
+    let config = tin_core::config::Config::load(&tin_core::Paths::from_env().config);
+    if !config.is_ok_and(|c| c.double_shift()) {
+        return;
+    }
+    let (fire, fail) = (handle.clone(), handle.clone());
+    keys::watch(
+        move || {
+            eprintln!("tin-app: double Shift, capturing");
+            fire.update(|s, _| s.start_capture(TextGrab::SelectionOrClipboard, None));
+        },
+        move |message| fail.update(move |s, _| s.status = Some(Status::Error(message))),
+    );
 }
 
 /// Registers `[app] shortcut` from the config, once the app has started (registration before
@@ -130,7 +149,7 @@ fn register_now(handle: &rune::AppHandle<Ui>) {
     let result = chord.parse::<rune::Shortcut>().map_err(|e| e.to_string()).and_then(|shortcut| {
         handle
             .register_shortcut(shortcut, |s: &mut Ui, tx| {
-                s.start_capture(TextGrab::Selection, tx.activation_token().map(str::to_owned))
+                s.start_capture(TextGrab::SelectionOrClipboard, tx.activation_token().map(str::to_owned))
             })
             .map_err(|e| e.to_string())
     });
