@@ -94,10 +94,14 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
 
         if let Some(a11y) = &a11y {
             let frame = frames.entry(key.clone()).or_insert_with(|| {
-                a11y.frame_for(&target.window).map(|(node, f)| {
-                    let dx = ((f.width - win.width) / 2).max(0);
-                    let dy = (f.height - win.height - dx).max(0);
-                    (node, (dx, dy))
+                a11y.frame_for(&target.window).map(|(node, frame)| {
+                    // Client-side shadows: the frame is bigger than the window's geometry by them.
+                    // A frame without extents gives boxes relative to the content already.
+                    let offset = frame.map_or((0, 0), |f| {
+                        let dx = ((f.width - win.width) / 2).max(0);
+                        (dx, (f.height - win.height - dx).max(0))
+                    });
+                    (node, offset)
                 })
             });
             if let Some((node, (dx, dy))) = frame {

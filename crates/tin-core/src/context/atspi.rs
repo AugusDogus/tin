@@ -22,7 +22,7 @@ const MAX_DEPTH: usize = 48;
 /// The fewest leading characters a frame's name and a window's title must share to match.
 const MIN_SHARED: usize = 6;
 /// The most elements one lookup asks about.
-const MAX_VISITS: usize = 600;
+const MAX_VISITS: usize = 1500;
 
 /// An object on the accessibility bus.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -116,7 +116,9 @@ impl Accessibility {
     /// and titles can differ in what follows the page's name (Chromium puts the profile in the
     /// window title but not the frame's name), so the frame sharing the longest start with the
     /// title wins, if they share at least [`MIN_SHARED`] characters.
-    pub fn frame_for(&self, window: &Window) -> Option<(Node, Rect)> {
+    /// The frame's extents are `None` when it doesn't report them (AccessKit apps answer -1);
+    /// its elements' boxes are then taken as relative to the window's content.
+    pub fn frame_for(&self, window: &Window) -> Option<(Node, Option<Rect>)> {
         let title = normalize(window.title.as_deref()?);
         let registry = Node {
             bus: "org.a11y.atspi.Registry".into(),
@@ -131,7 +133,8 @@ impl Accessibility {
             }
         }
         let (_, frame) = best?;
-        self.extents(&frame).map(|r| (frame, r))
+        let extents = self.extents(&frame);
+        Some((frame, extents))
     }
 
     /// The elements under a point (window coordinates), outermost first, below `frame`.
@@ -208,6 +211,7 @@ mod tests {
         let started = std::time::Instant::now();
         let (frame, extents) = a11y.frame_for(&window).unwrap_or_else(|| panic!("no frame titled {title:?}"));
         println!("frame {extents:?} found in {:?}", started.elapsed());
+        let extents = extents.unwrap_or_else(|| panic!("the frame reports no extents"));
         let (x, y) = (extents.x + extents.width / 3, extents.y + extents.height / 2);
         let started = std::time::Instant::now();
         let chain = a11y.chain_at(&frame, x, y);
