@@ -169,10 +169,10 @@ pub fn page_for(window: &Window) -> Option<Page> {
     page(Some(window), None, &mut Vec::new())
 }
 
-/// Freezes the monitor the focused window is on, with the windows visible on it, for picking
-/// what to capture.
-pub fn snapshot() -> Result<crate::snapshot::Snapshot, String> {
-    platform::snapshot()
+/// Freezes every monitor, with the windows visible on each, for picking what to capture. The
+/// focused window's monitor comes first.
+pub fn snapshots() -> Result<Vec<crate::snapshot::Snapshot>, String> {
+    platform::snapshots()
 }
 
 /// Puts text on the system clipboard.

@@ -24,20 +24,23 @@ running (`hex start`).
 
 ## Capture
 
-With `tin-app` running (`tin-app --background` at login), **double-tap Shift**. Tin freezes the
-monitor you're on and dims it:
+With `tin-app` running (`tin-app --background` at login), **double-tap Shift**. Tin freezes every
+monitor and dims them:
 
-- **Click** a window to capture it, or **drag** an area. The window under the cursor lights up.
-- Hex starts listening as soon as you pick. Say what it's about; type what it's for if you like.
+- **Click** a window to capture it, or **drag** an area, on any monitor. The window under the
+  cursor lights up wherever the cursor goes. **Esc** closes.
+- A small card opens with what you picked, and Hex starts listening. Say what it's about; type
+  what it's for if you like.
 - **Enter** saves (the cropped picture, your transcript, the window, and the page if it's a
-  browser). **Esc** goes back to picking, and again closes.
+  browser). **Esc** drops the note and goes back to picking on the same frozen screens.
 
 Two quick taps of the same Shift do it; typing a capital or holding Shift never does. Turn it off
 with `[app] double_shift = false`. On Linux it reads the keyboard from `/dev/input`, so you need
 to be in the `input` group (`sudo usermod -aG input $USER`, then log in again). On macOS it needs
 Accessibility permission. Tin only looks at Shift and "some other key"; it keeps nothing you type.
-The picker needs COSMIC for now (it reads windows and the screen through COSMIC's protocols,
-without a portal or prompt); macOS isn't built yet.
+The picker needs COSMIC for now: it reads windows and the screens through COSMIC's protocols,
+without a portal or prompt, and draws over each monitor with a layer-shell surface. macOS isn't
+built yet.
 
 You can also bind **`tin-app --capture`** to a key in your desktop's keyboard settings.
 `tin capture` and the window's **Capture clipboard** use the older text panel, which has:
@@ -164,7 +167,7 @@ Known limits:
 cargo test --workspace
 cargo run -p tin-app                                        # the window
 target/debug/tin-app --snap out.png --scene composer        # headless render (Rune tooling)
-target/debug/tin-app --picker --snap out.png --scene heard  # the picker, on a made-up desktop
+target/debug/tin-app --picker --snap out.png --scene heard  # the capture card, on a made-up desktop
 target/debug/tin-app --scene heard --script s.json --frames 30
 ```
 

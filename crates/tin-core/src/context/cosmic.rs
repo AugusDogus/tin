@@ -60,30 +60,43 @@ pub fn focused(want_screenshot: impl FnOnce(&Window) -> bool) -> Result<Focus, S
     Ok(Focus { window, screenshot })
 }
 
-/// The monitor the focused window is on (else the first), frozen, with its visible windows.
-pub fn snapshot() -> Result<Snapshot, String> {
+/// Every monitor, frozen, with the windows visible on it. The focused window's monitor first.
+pub fn snapshots() -> Result<Vec<Snapshot>, String> {
     let mut desktop = Desktop::connect()?;
     let state = &desktop.state;
-    let focused = state.toplevels.iter().find(|t| t.has_state(ACTIVATED));
-    let output = focused
-        .and_then(|t| t.geometry.first().map(|(o, _)| o.clone()))
-        .and_then(|id| state.outputs.iter().find(|o| o.wl.id() == id))
-        .or(state.outputs.first())
-        .ok_or("COSMIC reported no monitors")?;
-    let (wl, name) = (output.wl.clone(), output.name.clone().unwrap_or_default());
-    let bounds = output.logical.ok_or("COSMIC didn't say where the monitor is")?;
-    let mut windows: Vec<SnapWindow> = state
+    let focused_output = state
         .toplevels
         .iter()
-        .filter(|t| state.visible(t))
-        .filter_map(|t| {
-            let (_, rect) = t.geometry.iter().find(|(o, _)| *o == wl.id())?;
-            Some(SnapWindow { window: t.window(), rect: *rect, focused: t.has_state(ACTIVATED) })
+        .find(|t| t.has_state(ACTIVATED))
+        .and_then(|t| t.geometry.first())
+        .map(|(o, _)| o.clone());
+    let mut outputs: Vec<(wl_output::WlOutput, String, Rect, Vec<SnapWindow>)> = Vec::new();
+    for output in &state.outputs {
+        let Some(bounds) = output.logical else { continue };
+        let id = output.wl.id();
+        let mut windows: Vec<SnapWindow> = state
+            .toplevels
+            .iter()
+            .filter(|t| state.visible(t))
+            .filter_map(|t| {
+                let (_, rect) = t.geometry.iter().find(|(o, _)| *o == id)?;
+                Some(SnapWindow { window: t.window(), rect: *rect, focused: t.has_state(ACTIVATED) })
+            })
+            .collect();
+        windows.sort_by_key(|w| !w.focused);
+        outputs.push((output.wl.clone(), output.name.clone().unwrap_or_default(), bounds, windows));
+    }
+    outputs.sort_by_key(|(wl, ..)| Some(wl.id()) != focused_output);
+    if outputs.is_empty() {
+        return Err("COSMIC reported no monitors".into());
+    }
+    outputs
+        .into_iter()
+        .map(|(wl, output, bounds, windows)| {
+            let image = desktop.capture(Source::Output(&wl))?;
+            Ok(Snapshot { output, bounds, image, windows })
         })
-        .collect();
-    windows.sort_by_key(|w| !w.focused);
-    let image = desktop.capture(Source::Output(&wl))?;
-    Ok(Snapshot { output: name, bounds, image, windows })
+        .collect()
 }
 
 enum Source<'a> {
@@ -566,12 +579,17 @@ mod tests {
         std::fs::write(dir.join("tin-cosmic-window.png"), &shot.png).unwrap_or_else(|e| panic!("{e}"));
         println!("focused {:?} {}×{}", focus.window, shot.width, shot.height);
 
-        let snap = super::snapshot().unwrap_or_else(|e| panic!("{e}"));
-        let png = snap.image.png().unwrap_or_else(|e| panic!("{e}"));
-        std::fs::write(dir.join("tin-cosmic-output.png"), &png.png).unwrap_or_else(|e| panic!("{e}"));
-        println!("output {} {:?} image {}×{}", snap.output, snap.bounds, snap.image.width, snap.image.height);
-        for w in &snap.windows {
-            println!("  {:?} {:?} focused={}", w.window.app, w.rect, w.focused);
+        let started = std::time::Instant::now();
+        let snaps = super::snapshots().unwrap_or_else(|e| panic!("{e}"));
+        println!("froze {} monitors in {:?}", snaps.len(), started.elapsed());
+        for snap in &snaps {
+            let png = snap.image.png().unwrap_or_else(|e| panic!("{e}"));
+            std::fs::write(dir.join(format!("tin-cosmic-{}.png", snap.output)), &png.png)
+                .unwrap_or_else(|e| panic!("{e}"));
+            println!("output {} {:?} image {}×{}", snap.output, snap.bounds, snap.image.width, snap.image.height);
+            for w in &snap.windows {
+                println!("  {:?} {:?} focused={}", w.window.app, w.rect, w.focused);
+            }
         }
     }
 }

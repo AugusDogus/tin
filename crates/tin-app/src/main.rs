@@ -6,11 +6,15 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(target_os = "linux")]
+mod canvas;
 mod double_tap;
 mod ipc;
 mod keys;
 mod picker;
 mod scenes;
+#[cfg(target_os = "linux")]
+mod select;
 mod ui;
 mod view;
 
@@ -35,7 +39,7 @@ enum Launch {
     Background,
     /// Rune's headless tooling (`--snap`, `--tree`, `--script`, …): no IPC, no shortcut.
     Tooling,
-    /// The same, for the picker, with made-up scenes: `tin-app --picker --snap out.png --scene picking`.
+    /// The same, for the capture card, with made-up scenes: `tin-app --picker --snap out.png --scene heard`.
     PickerTooling(Vec<String>),
 }
 
@@ -106,7 +110,7 @@ fn run(launch: Launch) -> std::process::ExitCode {
 
     let picker_spec = AppSpec {
         on_key: Some(picker::on_key),
-        ..AppSpec::new("Tin capture", (1280.0, 800.0), || unreachable!("App::init builds the state"), picker::view)
+        ..AppSpec::new("Tin capture", (460.0, 420.0), || unreachable!("App::init builds the state"), picker::view)
     };
     if let Launch::PickerTooling(args) = launch {
         let picker = App::new(AppSpec { scenes: scenes::picker::SCENES, ..picker_spec }).args(args);
@@ -114,7 +118,7 @@ fn run(launch: Launch) -> std::process::ExitCode {
         picker.init(move || Picker::new(me, main_handle)).run();
         return std::process::ExitCode::SUCCESS;
     }
-    let picker = App::new(picker_spec).windowless().keep_running().full_screen(true);
+    let picker = App::new(picker_spec).windowless().keep_running();
     let picker_handle = picker.handle();
     let picker = picker.init({
         let (me, main) = (picker_handle.clone(), main_handle.clone());

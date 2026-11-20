@@ -46,19 +46,21 @@ fn recording(s: &mut Ui) {
     }
 }
 
-/// Picker scenes: `tin-app --picker --snap out.png --scene picking`. A made-up desktop, so no
-/// real screen is read, and no voice note is recorded.
+/// The capture card's scenes: `tin-app --picker --snap out.png --scene heard`. A made-up desktop,
+/// so no real screen is read, and no voice note is recorded.
 pub mod picker {
+    use std::sync::Arc;
     use tin_core::capture::{VoiceNote, Window};
     use tin_core::screenshot::{Image, Rect};
-    use tin_core::snapshot::{SnapWindow, Snapshot};
 
-    use crate::picker::{Picker, Stage};
+    use tin_core::snapshot::{SelectionKind, SnapWindow, Snapshot};
+
+    use crate::picker::{Pick, Picker};
     use crate::ui::Voice;
 
     type Scene = (&'static str, fn(&mut Picker));
 
-    pub const SCENES: &[Scene] = &[("picking", picking), ("dragging", dragging), ("noting", noting), ("heard", heard)];
+    pub const SCENES: &[Scene] = &[("noting", noting), ("heard", heard), ("area", area)];
 
     const W: u32 = 1280;
     const H: u32 = 800;
@@ -105,39 +107,38 @@ pub mod picker {
         }
     }
 
-    fn picking(s: &mut Picker) {
-        s.show(snapshot());
-        s.pointer = (300.0, 300.0);
-    }
-
-    fn dragging(s: &mut Picker) {
-        s.show(snapshot());
-        if let Stage::Picking { drag, .. } = &mut s.stage {
-            *drag = Some(Rect { x: 700, y: 200, width: 420, height: 260 });
-        }
+    fn show(s: &mut Picker, pick_window: bool, voice: Voice) {
+        let snap = Arc::new(snapshot());
+        let w = snap.windows[0].clone();
+        let pick = if pick_window {
+            Pick { snap: snap.clone(), rect: w.rect, kind: SelectionKind::Window, window: Some(w.window) }
+        } else {
+            Pick {
+                snap: snap.clone(),
+                rect: Rect { x: 700, y: 200, width: 420, height: 260 },
+                kind: SelectionKind::Region,
+                window: None,
+            }
+        };
+        s.show(Arc::new(vec![snap]), pick, voice);
     }
 
     fn noting(s: &mut Picker) {
-        picking(s);
-        s.stage = noting_stage(Voice::Recording);
+        show(s, true, Voice::Recording);
     }
 
     fn heard(s: &mut Picker) {
-        picking(s);
-        s.stage = noting_stage(Voice::Heard(VoiceNote {
-            transcript: "This tweet is the UX I want for Tin, ask blog whether we can do the same.".into(),
-            engine: "hex".into(),
-        }));
+        show(
+            s,
+            true,
+            Voice::Heard(VoiceNote {
+                transcript: "This tweet is the UX I want for Tin, ask blog whether we can do the same.".into(),
+                engine: "hex".into(),
+            }),
+        );
     }
 
-    fn noting_stage(voice: Voice) -> Stage {
-        let snap = std::sync::Arc::new(snapshot());
-        let w = snap.windows[0].clone();
-        let selection = tin_core::snapshot::Selection {
-            output: snap.output.clone(),
-            rect: w.rect,
-            kind: tin_core::snapshot::SelectionKind::Window,
-        };
-        Stage::Noting { snap, selection, window: Some(w.window), voice }
+    fn area(s: &mut Picker) {
+        show(s, false, Voice::Recording);
     }
 }
