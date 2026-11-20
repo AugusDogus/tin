@@ -12,6 +12,7 @@ pub mod hex;
 pub mod hook;
 pub mod intent;
 pub mod page;
+pub mod regions;
 pub mod screenshot;
 pub mod snapshot;
 pub mod store;
