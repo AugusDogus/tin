@@ -26,10 +26,11 @@ function tinMediaIn(area, doc = document, view = window) {
 
   const found = [];
   const seen = new Set();
+  // `url` is null for a video the page streams without an address: Tin notes it was there.
   const add = (kind, url, alt) => {
-    if (!url || seen.has(url) || found.length >= limit) return;
-    seen.add(url);
-    found.push({ kind, url, alt: alt || null });
+    if (seen.has(url) || found.length >= limit) return;
+    if (url) seen.add(url);
+    found.push({ kind, url: url || null, alt: alt || null });
   };
   for (const el of doc.querySelectorAll("img, video")) {
     const r = el.getBoundingClientRect();
@@ -39,7 +40,8 @@ function tinMediaIn(area, doc = document, view = window) {
       const url = el.currentSrc || el.src;
       if (web(url)) add("photo", url, el.alt);
     } else {
-      // A streamed video's address is the page's own (blob:); Tin notes it can't keep it.
+      // A streamed video's address is the page's own (blob:), or it has none (fed through a media
+      // stream object); Tin notes it can't keep it.
       const url = el.currentSrc || el.src || el.querySelector("source[src]")?.src;
       add("video", url, el.getAttribute("aria-label"));
       if (web(el.poster)) add("photo", el.poster, "The video's poster");

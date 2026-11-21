@@ -567,8 +567,12 @@ fn print_capture(c: &Capture, file: &str) {
             };
             match &m.kept {
                 tin_core::media::Kept::File { path } => println!("  {kind:<7} {}", path.display()),
-                tin_core::media::Kept::NotYet => println!("  {kind:<7} {}  (not downloaded yet)", m.url),
-                tin_core::media::Kept::Missing { reason } => println!("  {kind:<7} {}  (not kept: {reason})", m.url),
+                tin_core::media::Kept::NotYet => {
+                    println!("  {kind:<7} {}  (not downloaded yet)", m.url.as_deref().unwrap_or("streamed"))
+                }
+                tin_core::media::Kept::Missing { reason } => {
+                    println!("  {kind:<7} {}  (not kept: {reason})", m.url.as_deref().unwrap_or("streamed"))
+                }
             }
         }
     }

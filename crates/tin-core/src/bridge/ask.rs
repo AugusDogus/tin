@@ -98,7 +98,8 @@ pub fn socket_path(browser: &str) -> PathBuf {
 #[derive(Deserialize)]
 struct Found {
     kind: String,
-    url: String,
+    #[serde(default)]
+    url: Option<String>,
     #[serde(default)]
     alt: Option<String>,
 }
@@ -289,7 +290,7 @@ mod tests {
         }
         let media = media.unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(
-            media.iter().map(|m| m.url.as_str()).collect::<Vec<_>>(),
+            media.iter().filter_map(|m| m.url.as_deref()).collect::<Vec<_>>(),
             ["https://a.com/car.jpg", "blob:https://a.com/1"]
         );
         assert_eq!(media[0].alt.as_deref(), Some("A black Passat"));

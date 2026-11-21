@@ -15,8 +15,10 @@ const TIMEOUT: Duration = Duration::from_secs(300);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Media {
     pub kind: MediaKind,
-    /// Where the page loaded it from.
-    pub url: String,
+    /// Where the page loaded it from. `None` for a video the page streams without an address
+    /// (fed through a media stream object), which can't be kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     /// The page's description of it (an image's alt text).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alt: Option<String>,
@@ -46,14 +48,24 @@ pub enum Kept {
 }
 
 impl Media {
-    /// An item the extension reported, if it's a kind Tin keeps (`photo` or `video`).
-    pub fn found(kind: &str, url: String, alt: Option<String>) -> Option<Media> {
-        let kind = match kind {
-            "photo" => MediaKind::Photo,
-            "video" => MediaKind::Video,
-            _ => return None,
-        };
-        Some(Media { kind, url, alt: alt.filter(|a| !a.trim().is_empty()), kept: Kept::NotYet })
+    /// An item the extension reported, if it's a kind Tin keeps (`photo` or `video`). A video
+    /// without an address is noted as not kept; a photo without one says nothing.
+    pub fn found(kind: &str, url: Option<String>, alt: Option<String>) -> Option<Media> {
+        let alt = alt.filter(|a| !a.trim().is_empty());
+        let url = url.filter(|u| !u.is_empty());
+        match (kind, url) {
+            ("photo", Some(url)) => Some(Media { kind: MediaKind::Photo, url: Some(url), alt, kept: Kept::NotYet }),
+            ("video", Some(url)) => Some(Media { kind: MediaKind::Video, url: Some(url), alt, kept: Kept::NotYet }),
+            ("video", None) => Some(Media {
+                kind: MediaKind::Video,
+                url: None,
+                alt,
+                kept: Kept::Missing {
+                    reason: "the page streams it without a file address, so there's nothing to download; the capture's picture shows it".into(),
+                },
+            }),
+            _ => None,
+        }
     }
 }
 
@@ -65,13 +77,14 @@ pub fn keep(media: &mut [Media], dir: &Path, referrer: Option<&str>) {
         if m.kept != Kept::NotYet {
             continue;
         }
-        m.kept = if m.url.starts_with("https://") || m.url.starts_with("http://") {
-            match download(&agent, &m.url, referrer, &dir.join(format!("page-{}", i + 1)), m.kind) {
+        let Some(url) = &m.url else { continue };
+        m.kept = if url.starts_with("https://") || url.starts_with("http://") {
+            match download(&agent, url, referrer, &dir.join(format!("page-{}", i + 1)), m.kind) {
                 Ok(path) => Kept::File { path },
                 Err(reason) => Kept::Missing { reason },
             }
         } else {
-            let scheme = m.url.split(':').next().unwrap_or_default();
+            let scheme = url.split(':').next().unwrap_or_default();
             Kept::Missing {
                 reason: format!(
                     "the page made it in memory (a {scheme}: address), so there's no file to download; the capture's picture shows it"
@@ -161,9 +174,16 @@ mod tests {
 
     #[test]
     fn only_photos_and_videos_are_kept_and_empty_alt_text_is_dropped() {
-        let photo = Media::found("photo", "https://a.com/1.jpg".into(), Some(" ".into()));
+        let photo = Media::found("photo", Some("https://a.com/1.jpg".into()), Some(" ".into()));
         assert_eq!(photo.as_ref().map(|m| (m.kind, m.alt.clone())), Some((MediaKind::Photo, None)));
-        assert!(Media::found("audio", "https://a.com/1.mp3".into(), None).is_none());
+        assert!(Media::found("audio", Some("https://a.com/1.mp3".into()), None).is_none());
+    }
+
+    #[test]
+    fn a_video_without_an_address_is_noted_as_not_kept() {
+        let video = Media::found("video", None, None);
+        assert!(matches!(video, Some(Media { url: None, kept: Kept::Missing { .. }, .. })));
+        assert!(Media::found("photo", None, None).is_none(), "a photo without an address says nothing");
     }
 
     #[test]
@@ -171,7 +191,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
         let mut media = vec![Media {
             kind: MediaKind::Video,
-            url: "blob:https://x.com/1234".into(),
+            url: Some("blob:https://x.com/1234".into()),
             alt: None,
             kept: Kept::NotYet,
         }];

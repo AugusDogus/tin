@@ -236,7 +236,13 @@ impl Accessibility {
         {
             links.push(Link { url, text: Some(tidy(&text)).filter(|t| !t.is_empty()) });
         }
-        Piece { inline: INLINE_ROLES.contains(&role.as_str()), text }
+        let flow = match role.as_str() {
+            // A bare run of text: already part of its parent's text where the parent has any.
+            "static" | "text" if children.is_empty() => Flow::Text,
+            role if INLINE_ROLES.contains(&role) => Flow::Inline,
+            _ => Flow::Block,
+        };
+        Piece { text, flow }
     }
 
     /// A link's address: AT-SPI's Hyperlink interface, else an `href` attribute.
@@ -303,42 +309,55 @@ const INLINE_ROLES: &[&str] = &["link", "static", "text", "image", "superscript"
 /// character).
 const PLACEHOLDER: char = '\u{FFFC}';
 
-/// An element's text, and whether it runs on in its parent's line.
+/// An element's text, and how it sits in its parent's.
 struct Piece {
     text: String,
-    inline: bool,
+    flow: Flow,
 }
 
-/// An element's own text with its children's text put in place of its placeholders, in order.
-/// Children beyond the placeholders follow (toolkits without placeholders give only children).
-/// Blocks go on their own lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flow {
+    /// A bare run of text. Browsers list it as a child but also include it in the parent's own
+    /// text, without a placeholder.
+    Text,
+    /// Runs on in the parent's line (a link, an image).
+    Inline,
+    /// On its own lines (a paragraph, a heading).
+    Block,
+}
+
+/// An element's text. When it has text of its own (browsers), each placeholder in it takes the
+/// next child that isn't a bare run of text, whose text is in there already. Without (other
+/// toolkits), its children's text joined. Blocks go on their own lines.
 fn stitch(own: &str, children: &[Piece]) -> String {
-    let place = |out: &mut String, child: &Piece| {
-        if child.inline {
-            out.push_str(&child.text);
-        } else {
+    let place = |out: &mut String, child: &Piece| match child.flow {
+        Flow::Text | Flow::Inline => out.push_str(&child.text),
+        Flow::Block => {
             out.push('\n');
             out.push_str(&child.text);
             out.push('\n');
         }
     };
-    let mut rest = children.iter();
     let mut out = String::with_capacity(own.len());
+    if own.is_empty() {
+        for child in children {
+            if child.flow != Flow::Block {
+                out.push(' ');
+            }
+            place(&mut out, child);
+        }
+        return out;
+    }
+    let mut embedded = children.iter().filter(|c| c.flow != Flow::Text);
     for c in own.chars() {
         match c {
             PLACEHOLDER => {
-                if let Some(child) = rest.next() {
+                if let Some(child) = embedded.next() {
                     place(&mut out, child);
                 }
             }
             c => out.push(c),
         }
-    }
-    for child in rest {
-        if child.inline {
-            out.push(' ');
-        }
-        place(&mut out, child);
     }
     out
 }
@@ -375,11 +394,15 @@ mod tests {
     use super::*;
 
     fn inline(text: &str) -> Piece {
-        Piece { text: text.into(), inline: true }
+        Piece { text: text.into(), flow: Flow::Inline }
     }
 
     fn block(text: &str) -> Piece {
-        Piece { text: text.into(), inline: false }
+        Piece { text: text.into(), flow: Flow::Block }
+    }
+
+    fn leaf(text: &str) -> Piece {
+        Piece { text: text.into(), flow: Flow::Text }
     }
 
     #[test]
@@ -394,7 +417,16 @@ mod tests {
     #[test]
     fn children_without_placeholders_follow_the_text() {
         assert_eq!(tidy(&stitch("", &[block("Yard"), block("Pick Your Part"), inline("")])), "Yard\nPick Your Part");
-        assert_eq!(tidy(&stitch("VIN", &[inline("WVW")])), "VIN WVW");
+        assert_eq!(tidy(&stitch("", &[leaf("Bits:"), leaf("29% off")])), "Bits: 29% off");
+    }
+
+    #[test]
+    fn text_children_already_in_the_text_count_once() {
+        // Chromium lists a link's text as a child too, without a placeholder (Twitch's "LIVE").
+        assert_eq!(stitch("LIVE", &[leaf("LIVE")]), "LIVE");
+        // Placeholders stand for the other children only.
+        let line = stitch("Stock \u{FFFC} is here", &[leaf("Stock "), inline("#1284"), leaf(" is here")]);
+        assert_eq!(line, "Stock #1284 is here");
     }
 
     #[test]

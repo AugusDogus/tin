@@ -37,6 +37,13 @@ test("takes the images and videos inside the picked part of the page", () => {
   ]);
 });
 
+test("a video the page streams without an address is still reported", () => {
+  // Twitch feeds its player through a media stream object: no src at all.
+  const doc = page([video(box(0, 0, 800, 450), "")]);
+  const found = tinMediaIn({ left: 0, top: 0, width: 1, height: 1 }, doc, view);
+  assert.deepEqual(found, [{ kind: "video", url: null, alt: null }]);
+});
+
 test("a small pick on a big image takes the image", () => {
   const doc = page([img(box(0, 0, 1000, 600), "https://a.com/hero.jpg")]);
   const found = tinMediaIn({ left: 0.4, top: 0.4, width: 0.1, height: 0.1 }, doc, view);
