@@ -1,7 +1,8 @@
 # Tin
 
 Double-tap Shift to capture what you're looking at. Pick a window, something inside it or an
-area, say what it's for, and press Enter. Tin keeps it as a file an agent can pick up.
+area, say what it's for, and press Enter. Tin keeps it as a file an agent can pick up. An
+open-source take on [Copper](https://shadcn.com/copper).
 
 <a href="docs/media/capture-demo.mp4"><img src="docs/media/capture-demo.webp" width="960" alt="Double-tap Shift on a post on X, pick the post, say it's for the platformer and press Enter. Tin saves the post's link, the voice note, the post's text and its video. A recreation of Tin's interface with a made-up account. Play the demo in 4K."></a>
 
@@ -16,7 +17,7 @@ and videos, in case they're deleted.
 2. Run `sudo usermod -aG input $USER` and log in again, so Tin can hear Shift.
 3. Start `tin-app --background` at login, and run Hex for voice notes.
 
-Picking needs COSMIC for now. macOS builds run, but can't pick yet.
+Tin runs on Linux with the COSMIC desktop for now. macOS support isn't done yet.
 
 The browser extension (Helium for now) adds the page's selected text, whole tweets, and the
 images and videos where you pick. Download
