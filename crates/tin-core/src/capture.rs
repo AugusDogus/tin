@@ -33,6 +33,9 @@ pub struct Capture {
     /// The window or area the user picked on screen, when they picked one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection: Option<Selection>,
+    /// A kept copy of the tweet the capture is of (text, media), in case it's deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tweet: Option<crate::tweet::TweetArchive>,
     pub intent: Intent,
 }
 
@@ -135,6 +138,7 @@ impl Capture {
             // The store writes the picture and fills this in (`Tin::save`).
             screenshot: None,
             selection: draft.selection,
+            tweet: None,
             intent: draft.intent,
         })
     }

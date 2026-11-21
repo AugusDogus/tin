@@ -41,6 +41,8 @@ enum Command {
     Reopen { ids: Vec<String> },
     /// Say what a capture is for again, and route it from that.
     Route { id: String, purpose: Vec<String> },
+    /// Keep a copy of the tweet a capture is of (text, photos, videos), in case it's deleted.
+    Archive { id: String },
     /// Copy a capture's text (and page URL) to the clipboard.
     Copy { id: String },
     /// Delete a capture.
@@ -155,6 +157,18 @@ fn run(command: Command) -> Outcome {
             let saved = tin.reroute(&id, &purpose).map_err(|e| e.to_string())?;
             warn_all(saved.hook_errors.iter().map(ToString::to_string));
             println!("{} → {}", short(&saved.capture), describe_intent(&saved.capture.intent));
+            Ok(())
+        }
+        Command::Archive { id } => {
+            let tin = open()?;
+            let id = tin.store.resolve(&id).map_err(|e| e.to_string())?;
+            let capture = tin.archive_tweet(&id).map_err(|e| e.to_string())?;
+            if let Some(t) = &capture.tweet {
+                println!("Kept {} with {} media file(s)", t.url, t.media.len());
+                for m in &t.missing {
+                    warn(&format!("couldn't keep {m}"));
+                }
+            }
             Ok(())
         }
         Command::Copy { id } => {
@@ -410,6 +424,18 @@ fn print_capture(c: &Capture, file: &str) {
     }
     if let Some(n) = &c.note {
         println!("  note    {n}");
+    }
+    if let Some(t) = &c.tweet {
+        let by =
+            t.author.as_deref().map(|a| format!("{a} (@{})", t.handle)).unwrap_or_else(|| format!("@{}", t.handle));
+        println!("  tweet   {by}: {}", one_line(&t.text, 160));
+        if let Some(q) = &t.quoted {
+            println!("  quotes  @{}: {}", q.handle, one_line(&q.text, 140));
+        }
+        for m in &t.media {
+            println!("  media   {} {}", m.kind, m.file.display());
+        }
+        println!("  kept    {}", t.raw.display());
     }
     if let Some(s) = &c.screenshot {
         println!("  picture {} ({}×{})", s.path.display(), s.width, s.height);

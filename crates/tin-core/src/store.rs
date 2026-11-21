@@ -81,12 +81,21 @@ impl Store {
         serde_json::from_slice(&bytes).map_err(|source| StoreError::Corrupt { path, source })
     }
 
-    /// Deletes the capture and its window picture, if it has one.
+    /// Deletes the capture and what's kept beside it (its picture, a kept tweet and its media).
     pub fn remove(&self, id: &CaptureId) -> Result<(), StoreError> {
-        let png = self.dir.join(format!("{id}.png"));
-        match fs::remove_file(&png) {
+        for extra in [format!("{id}.png"), format!("{id}.tweet.json")] {
+            let path = self.dir.join(extra);
+            match fs::remove_file(&path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(StoreError::Io { action: "remove", path, source: e });
+                }
+                _ => {}
+            }
+        }
+        let media = self.dir.join(format!("{id}.media"));
+        match fs::remove_dir_all(&media) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                return Err(StoreError::Io { action: "remove", path: png, source: e });
+                return Err(StoreError::Io { action: "remove", path: media, source: e });
             }
             _ => {}
         }

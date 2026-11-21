@@ -16,6 +16,7 @@ pub mod regions;
 pub mod screenshot;
 pub mod snapshot;
 pub mod store;
+pub mod tweet;
 
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -66,6 +67,16 @@ pub enum OpenError {
 pub enum SaveError {
     #[error(transparent)]
     Empty(#[from] EmptyCapture),
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ArchiveTweetError {
+    #[error("this capture's page isn't a tweet, so there's nothing to keep")]
+    NotATweet,
+    #[error(transparent)]
+    Archive(#[from] tweet::ArchiveError),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -121,6 +132,20 @@ impl Tin {
         let file = self.store.save(&capture)?;
         let hook_errors = self.run_hooks(&capture, &file);
         Ok(Saved { capture, file, hook_errors })
+    }
+
+    /// Keeps a copy of the tweet a capture is of (text, photos, videos) beside it, and records it
+    /// in the capture. Only for captures whose page is a tweet.
+    pub fn archive_tweet(&self, id: &CaptureId) -> Result<Capture, ArchiveTweetError> {
+        let mut capture = self.store.load(id)?;
+        let status = match capture.page.as_ref().map(|p| &p.kind) {
+            Some(page::PageKind::Tweet { status_id, .. }) => status_id.clone(),
+            _ => return Err(ArchiveTweetError::NotATweet),
+        };
+        let archive = tweet::archive(&status, self.store.dir(), id.as_str())?;
+        capture.tweet = Some(archive);
+        self.store.save(&capture)?;
+        Ok(capture)
     }
 
     /// Checks a capture off, or opens it again.

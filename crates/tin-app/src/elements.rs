@@ -22,6 +22,8 @@ pub struct Item {
     pub rect: Rect,
     pub label: String,
     pub kind: SelectionKind,
+    /// The app's own element, when it came from the accessibility tree.
+    pub node: Option<Node>,
 }
 
 /// Everything under a point in one window, the window first.
@@ -93,7 +95,8 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
         let Some(target) = request.snap.windows.get(request.window) else { continue };
         let key = (request.snap.output.clone(), request.window);
         let win = target.rect;
-        let mut items = vec![Item { rect: win, label: window_label(&target.window), kind: SelectionKind::Window }];
+        let mut items =
+            vec![Item { rect: win, label: window_label(&target.window), kind: SelectionKind::Window, node: None }];
         let mut page = None;
         // How deep the accessibility walk went before filtering, for the log.
         let mut raw: Option<(usize, Option<String>, Stop)> = None;
@@ -130,7 +133,7 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
                         (Some(only), None) | (None, Some(only)) => only.clone(),
                         (None, None) => format!("{} × {}", rect.width, rect.height),
                     };
-                    push(&mut items, rect, label, SelectionKind::Element { role, name: e.name });
+                    push(&mut items, rect, label, SelectionKind::Element { role, name: e.name }, Some(e.node));
                 }
             }
         }
@@ -143,7 +146,7 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
             for r in region.path_at(px.round() as i32, py.round() as i32) {
                 let rect = r.scaled(1.0 / scale);
                 let label = format!("{} × {}", rect.width, rect.height);
-                push(&mut items, rect, label, SelectionKind::Element { role: None, name: None });
+                push(&mut items, rect, label, SelectionKind::Element { role: None, name: None }, None);
             }
         }
 
@@ -237,7 +240,7 @@ fn meaningful(role: Option<&str>, name: Option<&str>) -> bool {
 
 /// Adds an item inside the window, skipping repeats of the one before (toolkits nest
 /// same-sized panels) and anything outside the window.
-fn push(items: &mut Vec<Item>, rect: Rect, label: String, kind: SelectionKind) {
+fn push(items: &mut Vec<Item>, rect: Rect, label: String, kind: SelectionKind, node: Option<Node>) {
     let Some(window) = items.first().map(|i| i.rect) else { return };
     let Some(rect) = rect.clamp_to(window) else { return };
     if items.last().is_some_and(|last| last.rect == rect) {
@@ -247,10 +250,11 @@ fn push(items: &mut Vec<Item>, rect: Rect, label: String, kind: SelectionKind) {
         {
             last.label = label;
             last.kind = kind;
+            last.node = node;
         }
         return;
     }
-    items.push(Item { rect, label, kind });
+    items.push(Item { rect, label, kind, node });
 }
 
 fn window_label(w: &Window) -> String {
@@ -262,7 +266,12 @@ mod tests {
     use super::*;
 
     fn item(w: i32, h: i32) -> Item {
-        Item { rect: Rect { x: 0, y: 0, width: w, height: h }, label: String::new(), kind: SelectionKind::Window }
+        Item {
+            rect: Rect { x: 0, y: 0, width: w, height: h },
+            label: String::new(),
+            kind: SelectionKind::Window,
+            node: None,
+        }
     }
 
     #[test]
@@ -295,10 +304,10 @@ mod tests {
     fn push_skips_repeats_and_clamps_to_the_window() {
         let mut items = vec![item(100, 100)];
         let el = |role: &str| SelectionKind::Element { role: Some(role.into()), name: None };
-        push(&mut items, Rect { x: 0, y: 0, width: 100, height: 100 }, "panel".into(), el("panel"));
+        push(&mut items, Rect { x: 0, y: 0, width: 100, height: 100 }, "panel".into(), el("panel"), None);
         assert_eq!(items.len(), 1, "the same box as the window adds nothing");
-        push(&mut items, Rect { x: 50, y: 50, width: 100, height: 100 }, "panel".into(), el("panel"));
-        push(&mut items, Rect { x: 50, y: 50, width: 100, height: 100 }, "button".into(), el("button"));
+        push(&mut items, Rect { x: 50, y: 50, width: 100, height: 100 }, "panel".into(), el("panel"), None);
+        push(&mut items, Rect { x: 50, y: 50, width: 100, height: 100 }, "button".into(), el("button"), None);
         assert_eq!(items.len(), 2);
         assert_eq!(items[1].rect, Rect { x: 50, y: 50, width: 50, height: 50 });
         assert_eq!(items[1].label, "button");

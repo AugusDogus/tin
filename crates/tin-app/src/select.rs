@@ -53,6 +53,8 @@ pub struct Picked {
     pub window: Option<Window>,
     /// The web page picked from, as the browser described it: its address and title.
     pub page: Option<(String, Option<String>)>,
+    /// The app's own element picked, when it came from the accessibility tree.
+    pub node: Option<tin_core::context::atspi::Node>,
 }
 
 /// Shows the picker over every monitor and waits for a pick. `Ok(None)` is a cancel.
@@ -220,7 +222,10 @@ impl Picker {
             }
             _ => {
                 let target = &snap.windows[w];
-                Some((w, Item { rect: target.rect, label: label(&target.window), kind: SelectionKind::Window }))
+                Some((
+                    w,
+                    Item { rect: target.rect, label: label(&target.window), kind: SelectionKind::Window, node: None },
+                ))
             }
         }
     }
@@ -309,6 +314,7 @@ impl Picker {
                 Some(Picked {
                     window: w.map(|w| snap.windows[w].window.clone()),
                     page: w.and_then(|w| self.page_of(&snap.output, w)),
+                    node: None,
                     snap,
                     rect,
                     kind: SelectionKind::Region,
@@ -320,6 +326,7 @@ impl Picker {
                 self.hovered(i).map(|(w, item)| Picked {
                     window: Some(snap.windows[w].window.clone()),
                     page: self.page_of(&snap.output, w),
+                    node: item.node,
                     snap,
                     rect: item.rect,
                     kind: item.kind,

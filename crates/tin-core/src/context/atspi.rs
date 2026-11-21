@@ -42,6 +42,8 @@ pub struct Element {
     pub name: Option<String>,
     /// For a web page (a browser's document): its address and title.
     pub page: Option<(String, Option<String>)>,
+    /// The element itself, to look inside it later (its links).
+    pub node: Node,
 }
 
 /// Why a walk stopped where it did, for diagnosing pages that can't be picked into.
@@ -193,10 +195,41 @@ impl Accessibility {
             };
             let role = self.role(&child);
             let page = role.starts_with("document").then(|| self.page(&child)).flatten();
-            chain.push(Element { rect, role, name: self.name(&child), page });
+            chain.push(Element { rect, role, name: self.name(&child), page, node: child.clone() });
             node = child;
         }
         (chain, Stop { out_of_budget: budget == 0, ..Stop::default() })
+    }
+
+    /// The addresses of the links inside `node` (itself included), in tree order, looking at
+    /// no more than `limit` elements.
+    pub fn links_in(&self, node: &Node, limit: usize) -> Vec<String> {
+        let mut links = Vec::new();
+        let mut queue = std::collections::VecDeque::from([node.clone()]);
+        let mut seen = 0;
+        while let Some(n) = queue.pop_front() {
+            seen += 1;
+            if seen > limit {
+                break;
+            }
+            if self.role(&n) == "link"
+                && let Some(uri) = self.uri(&n)
+            {
+                links.push(uri);
+            }
+            queue.extend(self.children(&n));
+        }
+        links
+    }
+
+    /// A link's address: AT-SPI's Hyperlink interface, else an `href` attribute.
+    fn uri(&self, node: &Node) -> Option<String> {
+        let from_hyperlink = self.call::<_, String>(node, "org.a11y.atspi.Hyperlink", "GetURI", &(0i32,));
+        from_hyperlink.filter(|u| !u.is_empty()).or_else(|| {
+            let attributes: std::collections::HashMap<String, String> =
+                self.call(node, "org.a11y.atspi.Accessible", "GetAttributes", &())?;
+            attributes.get("href").filter(|u| !u.is_empty()).cloned()
+        })
     }
 
     fn stop_at(&self, node: &Node, x: i32, y: i32, out_of_budget: bool) -> Stop {

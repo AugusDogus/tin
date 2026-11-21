@@ -108,6 +108,14 @@ name = "game dev"     # a topic: tags captures, names no project
 on_capture = ["notify-send", "Tin", "Captured"]
 ```
 
+## Kept tweets
+
+Pick a tweet on X and Tin saves the tweet's own link (`x.com/<handle>/status/<id>`, read from
+the links inside what you picked), then keeps a copy in case it's deleted: its text, author,
+time and quoted tweet in the capture, the endpoint's raw JSON as `<id>.tweet.json`, and photos
+(original size) and videos (best MP4) in `<id>.media/`. The data comes from X's public
+syndication endpoint, which needs no account. `tin archive <capture>` retries or keeps one later.
+
 ## For agents
 
 Each capture is one file, `~/.local/share/tin/captures/<id>.json` (macOS:

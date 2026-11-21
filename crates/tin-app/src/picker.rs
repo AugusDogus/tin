@@ -37,7 +37,15 @@ pub struct Pick {
     pub window: Option<Window>,
     /// The web page picked from, as the browser described it: its address and title.
     pub page: Option<(String, Option<String>)>,
+    /// The app's own element picked, when it came from the accessibility tree.
+    pub node: Option<ElementRef>,
 }
+
+/// An element in another app, where Tin can reach apps' accessibility trees.
+#[cfg(target_os = "linux")]
+pub type ElementRef = context::atspi::Node;
+#[cfg(not(target_os = "linux"))]
+pub type ElementRef = ();
 
 pub enum Stage {
     /// Nothing on screen.
@@ -145,14 +153,23 @@ impl Picker {
         let (me, main) = (self.me.clone(), self.main.clone());
         std::thread::spawn(move || {
             let picture = pick.snap.crop(pick.rect).ok_or("the selection is empty".to_owned()).and_then(|i| i.png());
+            let app = pick.window.as_ref().and_then(|w| w.app.clone()).unwrap_or_else(|| "browser".into());
+            // A tweet picked on X: its own link, from the links inside the picked element.
+            #[cfg(target_os = "linux")]
+            let tweet = pick.node.as_ref().and_then(|node| {
+                let a11y = context::atspi::Accessibility::connect().ok()?;
+                let (handle, id) = tin_core::tweet::permalink(a11y.links_in(node, 400))?;
+                Some(Page::new(tin_core::tweet::url(&handle, &id), None, PageSource::PickedPage { app: app.clone() }))
+            });
+            #[cfg(not(target_os = "linux"))]
+            let tweet: Option<Page> = None;
             let draft = Draft {
-                // The page the browser said was picked; else the browser's session file.
-                page: match (pick.page, &pick.window) {
-                    (Some((url, title)), window) => {
-                        let app = window.as_ref().and_then(|w| w.app.clone()).unwrap_or_else(|| "browser".into());
-                        Some(Page::new(url, title, PageSource::PickedPage { app }))
-                    }
-                    (None, window) => window.as_ref().and_then(context::page_for),
+                // The tweet picked; else the page the browser said was picked; else the browser's
+                // session file.
+                page: match (tweet, pick.page, &pick.window) {
+                    (Some(tweet), ..) => Some(tweet),
+                    (None, Some((url, title)), _) => Some(Page::new(url, title, PageSource::PickedPage { app })),
+                    (None, None, window) => window.as_ref().and_then(context::page_for),
                 },
                 window: pick.window,
                 voice: match voice {
@@ -164,7 +181,8 @@ impl Picker {
                 intent: Intent { said: Some(said), ..Intent::default() },
                 ..Draft::default()
             };
-            let status = match (picture, tin.save(draft)) {
+            let saved = tin.save(draft);
+            let status = match (picture, &saved) {
                 (_, Err(e)) => Status::Error(e.to_string()),
                 (Err(e), Ok(_)) => Status::Error(format!("Saved without a picture: {e}")),
                 (Ok(_), Ok(saved)) => match saved.hook_errors.first() {
@@ -172,6 +190,26 @@ impl Picker {
                     None => Status::Info(format!("Saved {}", crate::ui::describe_target(&saved.capture.intent.target))),
                 },
             };
+            // Keep the tweet's text and media in case it's deleted: in the background, so the card
+            // closes now.
+            if let Ok(saved) = saved
+                && matches!(saved.capture.page.as_ref().map(|p| &p.kind), Some(tin_core::page::PageKind::Tweet { .. }))
+            {
+                let (tin, main, id) = (tin.clone(), main.clone(), saved.capture.id.clone());
+                std::thread::spawn(move || {
+                    let status = match tin.archive_tweet(&id) {
+                        Ok(c) => Status::Info(format!(
+                            "Kept the tweet: its text and {} media file(s)",
+                            c.tweet.as_ref().map_or(0, |t| t.media.len())
+                        )),
+                        Err(e) => Status::Error(e.to_string()),
+                    };
+                    main.update(move |s, _| {
+                        s.reload();
+                        s.status = Some(status);
+                    });
+                });
+            }
             main.update(move |s, _| {
                 s.reload();
                 s.status = Some(status);
@@ -223,8 +261,9 @@ fn after_close(stage: Stage) -> (Stage, bool) {
 /// Shows the frozen screens and waits for a pick (on a worker thread), then opens the card.
 fn select(me: AppHandle<Picker>, main: AppHandle<Ui>, snaps: Arc<Vec<Arc<Snapshot>>>) {
     #[cfg(target_os = "linux")]
-    let picked = crate::select::pick(&snaps)
-        .map(|p| p.map(|p| Pick { snap: p.snap, rect: p.rect, kind: p.kind, window: p.window, page: p.page }));
+    let picked = crate::select::pick(&snaps).map(|p| {
+        p.map(|p| Pick { snap: p.snap, rect: p.rect, kind: p.kind, window: p.window, page: p.page, node: p.node })
+    });
     #[cfg(not(target_os = "linux"))]
     let picked: Result<Option<Pick>, String> = Err("Picking isn't built for this OS yet.".into());
     match picked {
@@ -353,6 +392,7 @@ mod tests {
             kind: SelectionKind::Region,
             window: None,
             page: None,
+            node: None,
         };
         Stage::Noting { pick: Box::new(pick), voice }
     }
