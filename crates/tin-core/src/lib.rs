@@ -143,7 +143,11 @@ impl Tin {
             Some(page::PageKind::Tweet { status_id, .. }) => status_id.clone(),
             _ => return Err(ArchiveTweetError::NotATweet),
         };
-        let archive = tweet::archive(&status, self.store.dir(), id.as_str())?;
+        // What Tin's extension saw of it (and its quoted tweet), when it's installed.
+        let tweet = bridge::cached_tweet(&self.paths.data, &status);
+        let quoted =
+            tweet.as_ref().and_then(|t| t.quoted_id.as_deref()).and_then(|q| bridge::cached_tweet(&self.paths.data, q));
+        let archive = tweet::archive(&status, self.store.dir(), id.as_str(), &tweet::Seen { tweet, quoted })?;
         capture.tweet = Some(archive);
         self.store.save(&capture)?;
         Ok(capture)

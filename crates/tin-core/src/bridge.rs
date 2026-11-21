@@ -40,6 +40,33 @@ pub enum Message {
         url: String,
         text: String,
     },
+    /// Tweets X's app loaded, whole: kept so a captured tweet's full text and media are known.
+    Tweets {
+        tweets: Vec<CachedTweet>,
+    },
+}
+
+/// A tweet as Tin's extension saw it in X's own data (long posts in full).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CachedTweet {
+    pub id: String,
+    pub handle: String,
+    #[serde(default)]
+    pub author: Option<String>,
+    pub text: String,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub quoted_id: Option<String>,
+    #[serde(default)]
+    pub media: Vec<CachedMedia>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CachedMedia {
+    /// `photo`, `video` or `animated_gif`.
+    pub kind: String,
+    pub url: String,
 }
 
 /// One browser's windows, as the extension last reported them.
@@ -83,6 +110,8 @@ impl BrowserState {
                     self.selections.insert(window, Selected { url, text, at_ms: now_ms });
                 }
             }
+            // Tweets are kept as files of their own (see `record`), not in the browser's state.
+            Message::Tweets { .. } => {}
             Message::Closed { window } => {
                 self.windows.remove(&window);
                 self.selections.remove(&window);
@@ -146,6 +175,9 @@ pub fn selection_for(data: &Path, window_title: &str) -> Option<Selected> {
 
 /// Applies one message to the browser's state file (written whole, then renamed into place).
 pub fn record(data: &Path, browser: &str, message: Message) -> std::io::Result<()> {
+    if let Message::Tweets { tweets } = &message {
+        return keep_tweets(data, tweets);
+    }
     let mut state = load(data, browser);
     state.apply(message, now_ms());
     std::fs::create_dir_all(dir(data))?;
@@ -153,6 +185,53 @@ pub fn record(data: &Path, browser: &str, message: Message) -> std::io::Result<(
     let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
     std::fs::write(&tmp, serde_json::to_vec_pretty(&state).map_err(std::io::Error::other)?)?;
     std::fs::rename(tmp, path)
+}
+
+fn tweets_dir(data: &Path) -> PathBuf {
+    dir(data).join("tweets")
+}
+
+/// A tweet the extension saw, if it did.
+pub fn cached_tweet(data: &Path, id: &str) -> Option<CachedTweet> {
+    if !id.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    std::fs::read(tweets_dir(data).join(format!("{id}.json"))).ok().and_then(|b| serde_json::from_slice(&b).ok())
+}
+
+/// How long seen tweets are kept: a capture usually follows within minutes.
+const TWEET_DAYS: u64 = 14;
+
+fn keep_tweets(data: &Path, tweets: &[CachedTweet]) -> std::io::Result<()> {
+    let dir = tweets_dir(data);
+    std::fs::create_dir_all(&dir)?;
+    for t in tweets.iter().filter(|t| !t.id.is_empty() && t.id.chars().all(|c| c.is_ascii_digit())) {
+        let path = dir.join(format!("{}.json", t.id));
+        let tmp = dir.join(format!(".{}.{}.tmp", t.id, std::process::id()));
+        std::fs::write(&tmp, serde_json::to_vec(t).map_err(std::io::Error::other)?)?;
+        std::fs::rename(tmp, path)?;
+    }
+    prune(&dir);
+    Ok(())
+}
+
+/// Drops seen tweets older than [`TWEET_DAYS`], at most once an hour.
+fn prune(dir: &Path) {
+    let marker = dir.join(".pruned");
+    let hour = std::time::Duration::from_secs(3600);
+    let fresh =
+        std::fs::metadata(&marker).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|e| e < hour));
+    if fresh {
+        return;
+    }
+    let _ = std::fs::write(&marker, b"");
+    let limit = std::time::Duration::from_secs(TWEET_DAYS * 24 * 3600);
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let old = entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|e| e > limit));
+        if old && entry.file_name().to_string_lossy().ends_with(".json") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn now_ms() -> u64 {
@@ -215,6 +294,27 @@ mod tests {
         let m: Message = serde_json::from_str(r#"{"type":"tab","window":7,"url":"https://a.com/","title":"A"}"#)
             .unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(m, Message::Tab { window: 7, url: "https://a.com/".into(), title: "A".into() });
+    }
+
+    #[test]
+    fn tweets_are_kept_as_files_and_read_back() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let tweet = CachedTweet {
+            id: "2123".into(),
+            handle: "southpolesteve".into(),
+            author: Some("Steve".into()),
+            text: "the whole long post".into(),
+            created_at: None,
+            quoted_id: None,
+            media: vec![CachedMedia {
+                kind: "photo".into(),
+                url: "https://pbs.twimg.com/media/A.jpg?name=orig".into(),
+            }],
+        };
+        record(dir.path(), "helium", Message::Tweets { tweets: vec![tweet.clone()] }).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(cached_tweet(dir.path(), "2123"), Some(tweet));
+        assert_eq!(cached_tweet(dir.path(), "../2123"), None, "ids are digits only");
+        assert!(load_all(dir.path()).is_empty(), "tweets don't touch the browser's window state");
     }
 
     #[test]

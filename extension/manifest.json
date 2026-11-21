@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Tin",
   "version": "0.1.0",
-  "description": "Tells Tin which page each window shows and what's selected in it, so captures know what you were looking at.",
+  "description": "Tells Tin which page each window shows, what's selected in it, and the tweets X loads, so captures know what you were looking at and keep tweets whole.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1p55G32KW5FfBBLOHB2VnJTmTNFOt35fz46fjf0a4LPz5n9gqbY4isHgwdl4irVDFpZJwRS9bWVIQydhZ/6EE53hZGI+aa/iF3KNCOqwypI8yDgKVt9cBb8/tznFfOpRH4J0IPXgkT919885/nPSxetNVC46vQHvfPZLpjwdM08yLiqua1phMFZAiPZCTM7UGCMm8eA66xWzbNs2zVqIOh+vLKJii+5VEQ4XkYq+k4N2m5xvsxVeOpFg/yDRfiBOgmC9j4olujDJTNVC+aYsKHKZAzKWMYTLCXiMOHsj9fqicmSbeDANnKIELXBAT3wbreDpZ3Mk7qmNH3upp7E0rQIDAQAB",
   "permissions": [
     "tabs",
@@ -20,6 +20,28 @@
         "selection.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "x-tweets.js",
+        "x-main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "x-relay.js"
+      ],
+      "run_at": "document_start"
     }
   ]
 }

@@ -24,10 +24,14 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
 });
 chrome.windows.onRemoved.addListener((windowId) => send({ type: "closed", window: windowId }));
 
-// A page's selected text, from selection.js, sent on with the window it's in.
+// A page's selected text (selection.js), sent on with the window it's in; and tweets from x.com.
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "selection" && sender.tab) {
     send({ type: "selection", window: sender.tab.windowId, url: message.url, text: message.text });
+  }
+  // Tweets X's app loaded, from x-main.js through x-relay.js.
+  if (message?.type === "tweets" && Array.isArray(message.tweets)) {
+    send({ type: "tweets", tweets: message.tweets });
   }
 });
 

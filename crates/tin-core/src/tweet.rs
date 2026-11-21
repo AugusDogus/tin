@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::bridge::CachedTweet;
 use crate::page::PageKind;
 
 /// A kept tweet, as stored in the capture.
@@ -67,7 +68,9 @@ pub fn url(handle: &str, id: &str) -> String {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArchiveError {
-    #[error("couldn't fetch the tweet from X ({0}). The capture is saved without it; try `tin archive` later.")]
+    #[error(
+        "couldn't fetch the tweet from X ({0}), and Tin's extension hadn't seen it. The capture is saved without it; try `tin archive` later."
+    )]
     Fetch(String),
     #[error("X didn't return a tweet for {0} (deleted, private, or age-restricted?). The capture is saved without it.")]
     NotATweet(String),
@@ -145,32 +148,74 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(60))).build().into()
 }
 
-/// Fetches a tweet and saves it under `dir` as `<stem>.tweet.json` and `<stem>.media/`.
-pub fn archive(id: &str, dir: &Path, stem: &str) -> Result<TweetArchive, ArchiveError> {
+/// What Tin's browser extension saw of a tweet and its quoted tweet, when it saw them: X's own
+/// data, with long posts in full.
+#[derive(Debug, Clone, Default)]
+pub struct Seen {
+    pub tweet: Option<CachedTweet>,
+    pub quoted: Option<CachedTweet>,
+}
+
+/// Keeps a tweet under `dir`: `<stem>.tweet.json` and `<stem>.media/`. What the extension saw
+/// comes first (it has long posts whole); X's public embed data fills in and is kept as the raw
+/// record when it answers.
+pub fn archive(id: &str, dir: &Path, stem: &str, seen: &Seen) -> Result<TweetArchive, ArchiveError> {
     let agent = agent();
-    // The endpoint wants a `token`; any value is accepted.
-    let endpoint = format!("https://cdn.syndication.twimg.com/tweet-result?id={id}&lang=en&token=tin");
-    let body = agent
-        .get(&endpoint)
-        .header("User-Agent", "Mozilla/5.0 (Tin)")
-        .call()
-        .and_then(|mut r| r.body_mut().read_to_string())
-        .map_err(|e| ArchiveError::Fetch(e.to_string()))?;
     let raw = dir.join(format!("{stem}.tweet.json"));
-    std::fs::write(&raw, &body).map_err(|source| ArchiveError::Write { path: raw.clone(), source })?;
-    let tweet: Syndicated = serde_json::from_str(&body).map_err(|_| ArchiveError::NotATweet(id.to_owned()))?;
-    if tweet.typename.as_deref() != Some("Tweet") || tweet.id_str.is_none() {
-        return Err(ArchiveError::NotATweet(id.to_owned()));
-    }
-    let mut archive = from_syndicated(&tweet, raw);
+    let syndicated = fetch(&agent, id).and_then(|body| {
+        let tweet: Syndicated = serde_json::from_str(&body).map_err(|_| ArchiveError::NotATweet(id.to_owned()))?;
+        if tweet.typename.as_deref() != Some("Tweet") || tweet.id_str.is_none() {
+            return Err(ArchiveError::NotATweet(id.to_owned()));
+        }
+        std::fs::write(&raw, &body).map_err(|source| ArchiveError::Write { path: raw.clone(), source })?;
+        Ok(tweet)
+    });
+
+    let (mut archive, media): (TweetArchive, Vec<(String, Option<String>)>) = match (&seen.tweet, syndicated) {
+        (Some(t), syndicated) => {
+            if syndicated.is_err() {
+                // Keep what the extension saw as the raw record instead.
+                let json = serde_json::to_vec_pretty(t).map_err(|e| ArchiveError::Fetch(e.to_string()))?;
+                std::fs::write(&raw, json).map_err(|source| ArchiveError::Write { path: raw.clone(), source })?;
+            }
+            let quoted = seen
+                .quoted
+                .as_ref()
+                .map(|q| Quoted {
+                    url: url(&q.handle, &q.id),
+                    handle: q.handle.clone(),
+                    author: q.author.clone(),
+                    text: q.text.clone(),
+                })
+                .or_else(|| syndicated_quoted(syndicated.as_ref().ok()));
+            let archive = TweetArchive {
+                url: url(&t.handle, &t.id),
+                id: t.id.clone(),
+                handle: t.handle.clone(),
+                author: t.author.clone(),
+                text: t.text.clone(),
+                created_at: t.created_at.clone(),
+                quoted,
+                media: Vec::new(),
+                missing: Vec::new(),
+                raw: raw.clone(),
+            };
+            (archive, t.media.iter().map(|m| (m.kind.clone(), Some(m.url.clone()))).collect())
+        }
+        (None, Ok(tweet)) => {
+            let media = tweet.media.iter().map(|m| (m.kind.clone(), source(m))).collect();
+            (from_syndicated(&tweet, raw.clone()), media)
+        }
+        (None, Err(e)) => return Err(e),
+    };
 
     let media_dir = dir.join(format!("{stem}.media"));
-    for (i, m) in tweet.media.iter().enumerate() {
-        let Some(src) = source(m) else {
-            archive.missing.push(format!("{} {}: no downloadable file", m.kind, i + 1));
+    for (i, (kind, src)) in media.into_iter().enumerate() {
+        let Some(src) = src else {
+            archive.missing.push(format!("{kind} {}: no downloadable file", i + 1));
             continue;
         };
-        let ext = if m.kind == "photo" {
+        let ext = if kind == "photo" {
             Path::new(src.split('?').next().unwrap_or(&src))
                 .extension()
                 .and_then(|e| e.to_str())
@@ -179,13 +224,36 @@ pub fn archive(id: &str, dir: &Path, stem: &str) -> Result<TweetArchive, Archive
         } else {
             "mp4".to_owned()
         };
-        let file = media_dir.join(format!("{}-{}.{ext}", i + 1, m.kind));
+        let file = media_dir.join(format!("{}-{kind}.{ext}", i + 1));
         match download(&agent, &src, &file) {
-            Ok(()) => archive.media.push(SavedMedia { kind: m.kind.clone(), file, source: src }),
-            Err(e) => archive.missing.push(format!("{} {}: {e}", m.kind, i + 1)),
+            Ok(()) => archive.media.push(SavedMedia { kind, file, source: src }),
+            Err(e) => archive.missing.push(format!("{kind} {}: {e}", i + 1)),
         }
     }
     Ok(archive)
+}
+
+/// X's public embed data for a tweet (what its embedded-tweet widget reads).
+fn fetch(agent: &ureq::Agent, id: &str) -> Result<String, ArchiveError> {
+    // The endpoint wants a `token`; any value is accepted.
+    let endpoint = format!("https://cdn.syndication.twimg.com/tweet-result?id={id}&lang=en&token=tin");
+    agent
+        .get(&endpoint)
+        .header("User-Agent", "Mozilla/5.0 (Tin)")
+        .call()
+        .and_then(|mut r| r.body_mut().read_to_string())
+        .map_err(|e| ArchiveError::Fetch(e.to_string()))
+}
+
+fn syndicated_quoted(t: Option<&Syndicated>) -> Option<Quoted> {
+    let q = t?.quoted_tweet.as_ref()?;
+    let handle = q.user.as_ref().and_then(|u| u.screen_name.clone()).unwrap_or_default();
+    Some(Quoted {
+        url: url(&handle, q.id_str.as_deref().unwrap_or_default()),
+        author: q.user.as_ref().and_then(|u| u.name.clone()),
+        handle,
+        text: q.text.clone(),
+    })
 }
 
 fn download(agent: &ureq::Agent, url: &str, file: &Path) -> Result<(), String> {
@@ -208,15 +276,7 @@ fn from_syndicated(t: &Syndicated, raw: PathBuf) -> TweetArchive {
         handle,
         text: t.text.clone(),
         created_at: t.created_at.clone(),
-        quoted: t.quoted_tweet.as_ref().map(|q| {
-            let handle = q.user.as_ref().and_then(|u| u.screen_name.clone()).unwrap_or_default();
-            Quoted {
-                url: url(&handle, q.id_str.as_deref().unwrap_or_default()),
-                author: q.user.as_ref().and_then(|u| u.name.clone()),
-                handle,
-                text: q.text.clone(),
-            }
-        }),
+        quoted: syndicated_quoted(Some(t)),
         media: Vec::new(),
         missing: Vec::new(),
         raw,
@@ -268,12 +328,35 @@ mod tests {
         );
     }
 
+    /// What the extension saw wins, and is kept as the raw record when X has no embed data.
+    #[test]
+    #[ignore = "needs the network"]
+    fn tweet_live_archive_keeps_what_the_extension_saw() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let seen = Seen {
+            tweet: Some(CachedTweet {
+                id: "1".into(),
+                handle: "someone".into(),
+                author: None,
+                text: "a long post, whole".into(),
+                created_at: None,
+                quoted_id: None,
+                media: Vec::new(),
+            }),
+            quoted: None,
+        };
+        let a = archive("1", dir.path(), "t", &seen).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(a.text, "a long post, whole");
+        assert_eq!(a.url, "https://x.com/someone/status/1");
+        assert!(a.raw.is_file());
+    }
+
     /// Fetches jack's first tweet: `cargo test -p tin-core -- --ignored tweet_live --nocapture`.
     #[test]
     #[ignore = "needs the network"]
     fn tweet_live_archive_of_a_public_tweet() {
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        let a = archive("20", dir.path(), "t").unwrap_or_else(|e| panic!("{e}"));
+        let a = archive("20", dir.path(), "t", &Seen::default()).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!((a.handle.as_str(), a.text.as_str()), ("jack", "just setting up my twttr"));
         assert!(a.raw.is_file());
     }

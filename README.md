@@ -108,13 +108,32 @@ name = "game dev"     # a topic: tags captures, names no project
 on_capture = ["notify-send", "Tin", "Captured"]
 ```
 
+## Browser extension
+
+`extension/` is a small Chromium extension (Helium, Chrome, Edge, Brave) that tells Tin:
+
+- which page each window shows, so captures don't guess from session files;
+- what's selected in the page (COSMIC doesn't share the selection with other apps);
+- the tweets X's own app loads, whole: long posts in full, with their photo and video URLs.
+
+It talks to Tin through native messaging: the browser runs the `tin` command as a helper, which
+writes what it hears to `<data>/browser/` (seen tweets are kept 14 days). No network port is
+opened. Set it up once:
+
+```sh
+tin extension install   # registers the helper with Helium
+```
+
+then open `helium://extensions`, turn on Developer mode, **Load unpacked** and pick `extension/`.
+`tin extension status` shows what it has reported. Its tests: `node --test extension/test`.
+
 ## Kept tweets
 
 Pick a tweet on X and Tin saves the tweet's own link (`x.com/<handle>/status/<id>`, read from
 the links inside what you picked), then keeps a copy in case it's deleted: its text, author,
-time and quoted tweet in the capture, the endpoint's raw JSON as `<id>.tweet.json`, and photos
-(original size) and videos (best MP4) in `<id>.media/`. The data comes from X's public
-syndication endpoint, which needs no account. `tin archive <capture>` retries or keeps one later.
+time and quoted tweet in the capture, the raw record as `<id>.tweet.json`, and photos (original
+size) and videos (best MP4) in `<id>.media/`. With the extension, the copy is what X's app
+loaded (long posts whole); without it, X's public embed data, which cuts long posts short. `tin archive <capture>` retries or keeps one later.
 
 ## For agents
 
