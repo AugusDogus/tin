@@ -12,6 +12,9 @@ use crate::screenshot::{Image, Rect};
 pub struct Snapshot {
     /// The output's name, such as `HDMI-A-1`.
     pub output: String,
+    /// The platform's id for the monitor, to put a window on it: the `wl_output` registry name
+    /// on Wayland, the `CGDirectDisplayID` on macOS.
+    pub display: Option<u32>,
     /// Where the monitor sits in the desktop, in points.
     pub bounds: Rect,
     /// What it showed, in device pixels.
@@ -195,6 +198,7 @@ mod tests {
         let rgba: Vec<u8> = (0..16u8).flat_map(|i| [i, 0, 0, 255]).collect();
         Snapshot {
             output: "DP-1".into(),
+            display: None,
             bounds: Rect { x: 0, y: 0, width: 2, height: 2 },
             image: Image { width: 4, height: 4, rgba },
             windows,
@@ -223,6 +227,7 @@ mod tests {
         let small = Rect { x: 1, y: 1, width: 2, height: 2 };
         let s = Snapshot {
             output: "DP-1".into(),
+            display: None,
             bounds: big,
             image: grey(4, 4),
             windows: vec![window("helium", big, false), window("teams", small, true)],

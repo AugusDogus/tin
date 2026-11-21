@@ -27,7 +27,15 @@ pub struct Picker {
     thumbnail: Pixels,
     pub stage: Stage,
     pub purpose: TextEdit,
+    /// Rune's overlays to pick on, when trying them (`TIN_PICKER=rune`) instead of `select.rs`.
+    screens: Option<Screens>,
 }
+
+/// The Rune picker's handle, where it's built.
+#[cfg(target_os = "linux")]
+pub type Screens = crate::screens::Screens;
+#[cfg(not(target_os = "linux"))]
+pub type Screens = ();
 
 /// What was picked, on which frozen monitor.
 #[derive(Clone)]
@@ -62,10 +70,11 @@ pub enum Stage {
 }
 
 impl Picker {
-    pub fn new(me: AppHandle<Picker>, main: AppHandle<Ui>) -> Picker {
+    pub fn new(me: AppHandle<Picker>, main: AppHandle<Ui>, screens: Option<Screens>) -> Picker {
         Picker {
             me,
             main,
+            screens,
             tin: Tin::open(tin_core::Paths::from_env()).map_err(|e| e.to_string()),
             thumbnail: Pixels::new(),
             stage: Stage::Idle,
@@ -75,18 +84,25 @@ impl Picker {
 
     /// Freezes every monitor and lets the user pick on them.
     pub fn start(&mut self) {
+        // Double-tapping again while picking on Rune's overlays cancels: the way out even if the
+        // overlays never get the keyboard.
+        #[cfg(target_os = "linux")]
+        if let (Stage::Selecting, Some(screens)) = (&self.stage, &self.screens) {
+            screens.cancel();
+            return;
+        }
         if !matches!(self.stage, Stage::Idle) {
             return;
         }
         self.stage = Stage::Selecting;
-        let (me, main) = (self.me.clone(), self.main.clone());
+        let (me, main, screens) = (self.me.clone(), self.main.clone(), self.screens.clone());
         std::thread::spawn(move || {
             // Something in the session can switch accessibility off again; apps only publish
             // their elements while it's on.
             #[cfg(target_os = "linux")]
             let _ = context::atspi::enable();
             match context::snapshots() {
-                Ok(snaps) => select(me, main, Arc::new(snaps.into_iter().map(Arc::new).collect())),
+                Ok(snaps) => select(me, main, screens, Arc::new(snaps.into_iter().map(Arc::new).collect())),
                 Err(e) => fail(&me, &main, e),
             }
         });
@@ -337,7 +353,20 @@ fn kept_status(capture: &tin_core::capture::Capture) -> Status {
 }
 
 /// Shows the frozen screens and waits for a pick (on a worker thread), then opens the card.
-fn select(me: AppHandle<Picker>, main: AppHandle<Ui>, snaps: Arc<Vec<Arc<Snapshot>>>) {
+fn select(me: AppHandle<Picker>, main: AppHandle<Ui>, screens: Option<Screens>, snaps: Arc<Vec<Arc<Snapshot>>>) {
+    #[cfg(target_os = "linux")]
+    if let Some(screens) = screens {
+        screens.open(snaps.to_vec(), move |picked| match picked {
+            Some(pick) => {
+                me.update(move |s, _| s.picked(pick));
+                me.open();
+            }
+            None => me.update(|s, _| s.stage = Stage::Idle),
+        });
+        return;
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = screens;
     #[cfg(target_os = "linux")]
     let picked = crate::select::pick(&snaps).map(|p| {
         p.map(|p| Pick { snap: p.snap, rect: p.rect, kind: p.kind, window: p.window, page: p.page, node: p.node })
@@ -465,6 +494,7 @@ mod tests {
     fn noting(voice: Voice) -> Stage {
         let snap = Arc::new(Snapshot {
             output: "DP-1".into(),
+            display: None,
             bounds: Rect { x: 0, y: 0, width: 1, height: 1 },
             image: Image { width: 1, height: 1, rgba: vec![0; 4] },
             windows: Vec::new(),

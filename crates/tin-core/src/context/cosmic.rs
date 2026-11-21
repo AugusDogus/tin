@@ -70,7 +70,7 @@ pub fn snapshots() -> Result<Vec<Snapshot>, String> {
         .find(|t| t.has_state(ACTIVATED))
         .and_then(|t| t.geometry.first())
         .map(|(o, _)| o.clone());
-    let mut outputs: Vec<(wl_output::WlOutput, String, Rect, Vec<SnapWindow>)> = Vec::new();
+    let mut outputs: Vec<(wl_output::WlOutput, u32, String, Rect, Vec<SnapWindow>)> = Vec::new();
     for output in &state.outputs {
         let Some(bounds) = output.logical else { continue };
         let id = output.wl.id();
@@ -84,7 +84,7 @@ pub fn snapshots() -> Result<Vec<Snapshot>, String> {
             })
             .collect();
         windows.sort_by_key(|w| !w.focused);
-        outputs.push((output.wl.clone(), output.name.clone().unwrap_or_default(), bounds, windows));
+        outputs.push((output.wl.clone(), output.global, output.name.clone().unwrap_or_default(), bounds, windows));
     }
     outputs.sort_by_key(|(wl, ..)| Some(wl.id()) != focused_output);
     if outputs.is_empty() {
@@ -92,9 +92,9 @@ pub fn snapshots() -> Result<Vec<Snapshot>, String> {
     }
     outputs
         .into_iter()
-        .map(|(wl, output, bounds, windows)| {
+        .map(|(wl, display, output, bounds, windows)| {
             let image = desktop.capture(Source::Output(&wl))?;
-            Ok(Snapshot { output, bounds, image, windows })
+            Ok(Snapshot { output, display: Some(display), bounds, image, windows })
         })
         .collect()
 }
@@ -164,6 +164,8 @@ struct State {
 
 struct Output {
     wl: wl_output::WlOutput,
+    /// Its registry name, which other clients (Rune's overlays) target it by.
+    global: u32,
     xdg: Option<zxdg_output_v1::ZxdgOutputV1>,
     name: Option<String>,
     position: Option<(i32, i32)>,
@@ -369,7 +371,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
             "zxdg_output_manager_v1" => state.xdg = Some(registry.bind(name, version.min(3), qh, ())),
             "wl_output" if version >= 4 => {
                 let wl = registry.bind(name, 4, qh, ());
-                state.outputs.push(Output { wl, xdg: None, name: None, position: None, logical: None });
+                state.outputs.push(Output { wl, global: name, xdg: None, name: None, position: None, logical: None });
             }
             "wl_shm" => state.shm = Some(registry.bind(name, 1, qh, ())),
             "ext_foreign_toplevel_image_capture_source_manager_v1" => {

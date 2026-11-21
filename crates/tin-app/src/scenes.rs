@@ -101,6 +101,7 @@ pub mod picker {
             .collect();
         Snapshot {
             output: "HDMI-A-1".into(),
+            display: None,
             bounds: Rect { x: 0, y: 0, width: W as i32, height: H as i32 },
             image: Image { width: W, height: H, rgba },
             windows,

@@ -16,6 +16,8 @@ mod keys;
 mod picker;
 mod scenes;
 #[cfg(target_os = "linux")]
+mod screens;
+#[cfg(target_os = "linux")]
 mod select;
 mod ui;
 mod view;
@@ -100,7 +102,7 @@ fn run(launch: Launch) -> std::process::ExitCode {
         Launch::Capture | Launch::Background => main.windowless(),
     };
     let main_handle = main.handle();
-    let main = main.init({
+    let mut main = main.init({
         let me = main_handle.clone();
         move || Ui::new(me)
     });
@@ -117,14 +119,20 @@ fn run(launch: Launch) -> std::process::ExitCode {
     if let Launch::PickerTooling(args) = launch {
         let picker = App::new(AppSpec { scenes: scenes::picker::SCENES, ..picker_spec }).args(args);
         let me = picker.handle();
-        picker.init(move || Picker::new(me, main_handle)).run();
+        picker.init(move || Picker::new(me, main_handle, None)).run();
         return std::process::ExitCode::SUCCESS;
     }
+    // On trial: pick on Rune's overlays (`screens.rs`) instead of `select.rs`.
+    #[cfg(target_os = "linux")]
+    let screens = (std::env::var("TIN_PICKER").as_deref() == Ok("rune")).then(|| screens::Screens::install(&mut main));
+    #[cfg(not(target_os = "linux"))]
+    let screens: Option<picker::Screens> = None;
+    let rune_picker = screens.is_some();
     let picker = App::new(picker_spec).windowless().keep_running().on_close(|p: &mut Picker, _| p.closed());
     let picker_handle = picker.handle();
     let picker = picker.init({
         let (me, main) = (picker_handle.clone(), main_handle.clone());
-        move || Picker::new(me, main)
+        move || Picker::new(me, main, screens)
     });
     let capture: Capture = Arc::new(move || picker_handle.update(|p, _| p.start()));
 
@@ -154,6 +162,12 @@ fn run(launch: Launch) -> std::process::ExitCode {
     });
     register_shortcut(&main_handle, capture.clone());
     watch_double_shift(&main_handle, capture);
+    // Overlays belong to an app's own loop: the card joins the main app's.
+    if rune_picker {
+        main.window(WindowSpec::from_app("picker", picker));
+        main.run();
+        return std::process::ExitCode::SUCCESS;
+    }
     rune::run_windows(move |_| -> Vec<rune::AnyWindowSpec> {
         vec![WindowSpec::from_app("main", main).into(), WindowSpec::from_app("picker", picker).into()]
     });
