@@ -131,13 +131,15 @@ impl Picker {
                 let Ok(tin) = &self.tin else { return };
                 let (hex, me) = (tin.hex(), self.me.clone());
                 std::thread::spawn(move || {
-                    let next = match hex.stop() {
-                        Ok(note) => Voice::Heard(note),
-                        Err(e) => Voice::Failed(e.to_string()),
-                    };
-                    me.update(move |s, _| {
-                        s.set_voice(&Voice::Transcribing, next);
-                        s.save();
+                    let stopped = hex.stop();
+                    me.update(move |s, _| match stopped {
+                        Ok(note) => {
+                            s.set_voice(&Voice::Transcribing, Voice::Heard(note));
+                            s.save();
+                        }
+                        // Keep the card open on the error, so a lost note isn't saved silently:
+                        // Enter again saves without it.
+                        Err(e) => s.set_voice(&Voice::Transcribing, Voice::Failed(e.to_string())),
                     });
                 });
             }
@@ -329,6 +331,10 @@ pub fn view(s: &Picker, cx: &mut Cx<Picker>) -> El {
         Voice::Failed(e) => (t.text_secondary, e.clone()),
         Voice::Idle => (t.text_secondary, String::new()),
     };
+    let hint = match voice {
+        Voice::Failed(_) => "Enter saves without the voice note · Esc discards",
+        _ => "Enter saves · Esc discards",
+    };
     let purpose = text_input(&s.purpose, type_::BODY.lh(20.0))
         .key("purpose")
         .label("What it's for")
@@ -375,9 +381,7 @@ pub fn view(s: &Picker, cx: &mut Cx<Picker>) -> El {
                 .child(text(status).key("voice").font(type_::BODY).color(t.text).wrap().grow(1.0).shrink().min_w(0.0)),
         )
         .child(purpose)
-        .child(
-            row().child(text("Enter saves · Esc discards").font(type_::LABEL).color(t.text_secondary)).child(spacer()),
-        )
+        .child(row().child(text(hint).font(type_::LABEL).color(t.text_secondary)).child(spacer()))
 }
 
 #[cfg(test)]
