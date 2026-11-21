@@ -3,6 +3,7 @@ name = "tin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 clap = { version = "4.6.9", features = ["derive"] }

@@ -40,6 +40,7 @@ pub struct Pick {
     /// The web page picked from, as the browser described it.
     pub page: Option<WebPage>,
     /// The app's own element picked, when it came from the accessibility tree.
+    #[cfg_attr(not(target_os = "linux"), expect(dead_code, reason = "only Linux reads apps' elements so far"))]
     pub node: Option<ElementRef>,
 }
 
@@ -342,7 +343,10 @@ fn select(me: AppHandle<Picker>, main: AppHandle<Ui>, snaps: Arc<Vec<Arc<Snapsho
         p.map(|p| Pick { snap: p.snap, rect: p.rect, kind: p.kind, window: p.window, page: p.page, node: p.node })
     });
     #[cfg(not(target_os = "linux"))]
-    let picked: Result<Option<Pick>, String> = Err("Picking isn't built for this OS yet.".into());
+    let picked: Result<Option<Pick>, String> = {
+        drop(snaps);
+        Err("Picking isn't built for this OS yet.".into())
+    };
     match picked {
         Ok(Some(pick)) => {
             me.update(move |s, _| s.picked(pick));

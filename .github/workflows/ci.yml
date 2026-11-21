@@ -60,7 +60,7 @@ jobs:
         with:
           node-version: 22
       - name: Test
-        run: node --test extension/test
+        run: node --test extension/test/*.test.mjs
       - name: Package
         run: |
           mkdir -p dist

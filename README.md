@@ -135,7 +135,7 @@ tin extension install   # registers the helper with Helium
 ```
 
 then open `helium://extensions`, turn on Developer mode, **Load unpacked** and pick `extension/`.
-`tin extension status` shows what it has reported. Its tests: `node --test extension/test`.
+`tin extension status` shows what it has reported. Its tests: `node --test extension/test/*.test.mjs`.
 
 ## Kept tweets
 
