@@ -1,7 +1,7 @@
 <div align="center">
   <h1>Tin</h1>
   <p>Capture what you're looking at, say what it's for, and hand it to an agent.</p>
-  <p><a href="#install">Get started</a> · <a href="docs/media/capture-demo.mp4">Play demo in 1080p60</a></p>
+  <p><a href="#install">Get started</a> · <a href="docs/media/capture-demo.mp4">Play demo in 4K60</a></p>
   <a href="docs/media/capture-demo.mp4"><img src="docs/media/capture-demo.webp" width="960" alt="Double-tap Shift on a post on X, pick the post, say it's for the platformer and press Enter. Tin saves the post's link, the voice note, the post's text and its video. A recreation of Tin's interface with a made-up account. Play the 14-second demo."></a>
 </div>
 
