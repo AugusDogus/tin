@@ -113,7 +113,15 @@ pub fn gather(options: Options) -> Gathered {
             .filter(|t| !t.trim().is_empty())
             .map(|text| CapturedText { text, from })
     };
+    // In a browser with Tin's extension, the page's own selection (COSMIC doesn't share the
+    // desktop's selection with other apps).
+    let from_extension = || {
+        let title = window.as_ref()?.title.as_deref()?;
+        crate::bridge::selection_for(&crate::Paths::from_env().data, title)
+            .map(|s| CapturedText { text: s.text, from: TextSource::Selection })
+    };
     let text = match options.text {
+        TextGrab::Selection | TextGrab::SelectionOrClipboard if let Some(text) = from_extension() => Some(text),
         TextGrab::SelectionOrClipboard => take(read(TextGrab::Selection)).or_else(|| take(read(TextGrab::Clipboard))),
         grab => take(read(grab)),
     };

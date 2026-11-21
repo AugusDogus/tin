@@ -34,6 +34,12 @@ pub enum Message {
     Closed {
         window: i64,
     },
+    /// The text selected in a window's page (empty when nothing is).
+    Selection {
+        window: i64,
+        url: String,
+        text: String,
+    },
 }
 
 /// One browser's windows, as the extension last reported them.
@@ -43,6 +49,16 @@ pub struct BrowserState {
     pub windows: BTreeMap<i64, Tab>,
     #[serde(default)]
     pub focused: Option<i64>,
+    /// Each window's selected text, while something is selected.
+    #[serde(default)]
+    pub selections: BTreeMap<i64, Selected>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Selected {
+    pub url: String,
+    pub text: String,
+    pub at_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,8 +76,16 @@ impl BrowserState {
                 self.windows.insert(window, Tab { url, title, at_ms: now_ms });
             }
             Message::Focus { window } => self.focused = Some(window),
+            Message::Selection { window, url, text } => {
+                if text.trim().is_empty() {
+                    self.selections.remove(&window);
+                } else {
+                    self.selections.insert(window, Selected { url, text, at_ms: now_ms });
+                }
+            }
             Message::Closed { window } => {
                 self.windows.remove(&window);
+                self.selections.remove(&window);
                 if self.focused == Some(window) {
                     self.focused = None;
                 }
@@ -72,10 +96,21 @@ impl BrowserState {
     /// The tab a window titled `window_title` shows: browsers title windows after their active
     /// tab ("<tab> - Helium", sometimes with a profile name between).
     pub fn tab_for(&self, window_title: &str) -> Option<&Tab> {
+        self.window_for(window_title).and_then(|w| self.windows.get(&w))
+    }
+
+    /// The extension's id for the window titled `window_title`.
+    pub fn window_for(&self, window_title: &str) -> Option<i64> {
         self.windows
-            .values()
-            .filter(|t| crate::browser::titles_window(&t.title, window_title))
-            .max_by_key(|t| (t.title.len(), t.at_ms))
+            .iter()
+            .filter(|(_, t)| crate::browser::titles_window(&t.title, window_title))
+            .max_by_key(|(_, t)| (t.title.len(), t.at_ms))
+            .map(|(id, _)| *id)
+    }
+
+    /// The text selected in the window titled `window_title`, if any.
+    pub fn selection_for(&self, window_title: &str) -> Option<&Selected> {
+        self.window_for(window_title).and_then(|w| self.selections.get(&w))
     }
 }
 
@@ -102,6 +137,11 @@ pub fn load_all(data: &Path) -> Vec<(String, BrowserState)> {
             Some((name.clone(), load(data, &name)))
         })
         .collect()
+}
+
+/// The text selected in the browser window titled `window_title`, from any browser's report.
+pub fn selection_for(data: &Path, window_title: &str) -> Option<Selected> {
+    load_all(data).into_iter().find_map(|(_, state)| state.selection_for(window_title).cloned())
 }
 
 /// Applies one message to the browser's state file (written whole, then renamed into place).
@@ -160,6 +200,11 @@ mod tests {
         s.apply(Message::Focus { window: 2 }, 30);
         assert_eq!(s.tab_for("Ludwig - Twitch - Helium").map(|t| t.url.as_str()), Some("https://twitch.tv/ludwig"));
         assert_eq!(s.tab_for("(1) Home / X - Helium - augie").map(|t| t.url.as_str()), Some("https://x.com/home"));
+        s.apply(Message::Selection { window: 2, url: "https://twitch.tv/ludwig".into(), text: "gg".into() }, 35);
+        assert_eq!(s.selection_for("Ludwig - Twitch - Helium").map(|t| t.text.as_str()), Some("gg"));
+        assert!(s.selection_for("(1) Home / X - Helium").is_none());
+        s.apply(Message::Selection { window: 2, url: "https://twitch.tv/ludwig".into(), text: " ".into() }, 36);
+        assert!(s.selection_for("Ludwig - Twitch - Helium").is_none(), "an empty selection clears it");
         s.apply(Message::Closed { window: 2 }, 40);
         assert_eq!(s.focused, None);
         assert!(s.tab_for("Ludwig - Twitch - Helium").is_none());

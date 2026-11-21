@@ -8,7 +8,7 @@ use rune::{
     AppHandle, Color, Cx, El, Key, KeyEvent, Pixels, SurfaceFit, TextEdit, Tx, col, el, row, spacer, text, text_input,
 };
 use tin_core::Tin;
-use tin_core::capture::{Draft, Window};
+use tin_core::capture::{CapturedText, Draft, TextSource, Window};
 use tin_core::context;
 use tin_core::intent::Intent;
 use tin_core::page::{Page, PageSource};
@@ -154,6 +154,7 @@ impl Picker {
         std::thread::spawn(move || {
             let picture = pick.snap.crop(pick.rect).ok_or("the selection is empty".to_owned()).and_then(|i| i.png());
             let app = pick.window.as_ref().and_then(|w| w.app.clone()).unwrap_or_else(|| "browser".into());
+            let window_title = pick.window.as_ref().and_then(|w| w.title.clone());
             // A tweet picked on X: its own link, from the links inside the picked element.
             #[cfg(target_os = "linux")]
             let tweet = pick.node.as_ref().and_then(|node| {
@@ -176,6 +177,11 @@ impl Picker {
                     Voice::Heard(note) => Some(note),
                     _ => None,
                 },
+                // Text selected in that browser window, as Tin's extension reported it.
+                text: window_title.as_deref().and_then(|title| {
+                    tin_core::bridge::selection_for(&tin_core::Paths::from_env().data, title)
+                        .map(|s| CapturedText { text: s.text, from: TextSource::Selection })
+                }),
                 screenshot: picture.as_ref().ok().cloned(),
                 selection: Some(Selection { output: pick.snap.output.clone(), rect: pick.rect, kind: pick.kind }),
                 intent: Intent { said: Some(said), ..Intent::default() },
