@@ -204,7 +204,7 @@ impl Shared {
 
     fn redraw(&self) {
         for overlay in lock(&self.overlays).iter() {
-            overlay.update(|_, _| {});
+            overlay.update(|_, tx| tx.instant());
         }
     }
 }
@@ -346,6 +346,8 @@ fn on_key(s: &mut Screen, ev: &KeyEvent, _: &mut Tx) -> bool {
 fn view(s: &Screen, _: &mut Cx<Screen>) -> El {
     let root = el()
         .key("screen")
+        // The box jumps to whatever is hovered; Rune would otherwise spring it there.
+        .instant_changes()
         .w_full()
         .h_full()
         .pixels_fit(&s.dim, SurfaceFit::Fit)
