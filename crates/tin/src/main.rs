@@ -52,10 +52,23 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Connect Tin's browser extension: register its helper with the browser.
+    Extension {
+        #[command(subcommand)]
+        action: ExtensionAction,
+    },
     /// Write a commented starter config, if there isn't one.
     Init,
     /// Print where Tin keeps its config and captures.
     Paths,
+}
+
+#[derive(Subcommand)]
+enum ExtensionAction {
+    /// Register the extension's helper with Helium, and say how to load the extension.
+    Install,
+    /// What the extension has reported: each browser window's page.
+    Status,
 }
 
 #[derive(Args)]
@@ -113,6 +126,16 @@ struct ListArgs {
 }
 
 fn main() -> ExitCode {
+    // A browser starts this as Tin's extension helper, passing the extension's origin.
+    if std::env::args().nth(1).is_some_and(|a| a.starts_with("chrome-extension://")) {
+        return match native_host() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("tin (extension helper): {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let cli = Cli::parse();
     match run(cli.command) {
         Ok(()) => ExitCode::SUCCESS,
@@ -187,6 +210,8 @@ fn run(command: Command) -> Outcome {
             Ok(())
         }
         Command::Routes { json } => routes(json),
+        Command::Extension { action: ExtensionAction::Install } => install_extension(),
+        Command::Extension { action: ExtensionAction::Status } => extension_status(),
         Command::Init => init(),
         Command::Paths => {
             let paths = Paths::from_env();
@@ -392,6 +417,81 @@ fn routes(json: bool) -> Outcome {
     Ok(())
 }
 
+/// Runs as the browser extension's native-messaging helper: reads messages on stdin, records
+/// them for Tin, answers each.
+fn native_host() -> Outcome {
+    let data = Paths::from_env().data;
+    // Which browser started this: its executable's name (helium, msedge, chrome, …).
+    let browser = std::fs::read_link(format!("/proc/{}/exe", std::os::unix::process::parent_id()))
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "browser".into());
+    let (mut input, mut output) = (std::io::stdin().lock(), std::io::stdout().lock());
+    while let Some(frame) = tin_core::bridge::read_frame(&mut input).map_err(|e| e.to_string())? {
+        let reply = match serde_json::from_slice::<tin_core::bridge::Message>(&frame) {
+            Ok(message) => match tin_core::bridge::record(&data, &browser, message) {
+                Ok(()) => serde_json::json!({ "ok": true }),
+                Err(e) => serde_json::json!({ "ok": false, "error": format!("couldn't record it: {e}") }),
+            },
+            Err(e) => serde_json::json!({ "ok": false, "error": format!("not a message Tin knows: {e}") }),
+        };
+        tin_core::bridge::write_frame(&mut output, reply.to_string().as_bytes()).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Helium's folder for native-messaging helpers.
+fn helium_hosts_dir() -> Result<std::path::PathBuf, String> {
+    dirs::config_dir()
+        .map(|c| c.join("net.imput.helium").join("NativeMessagingHosts"))
+        .ok_or_else(|| "couldn't find your config folder".to_owned())
+}
+
+fn install_extension() -> Outcome {
+    let exe = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|e| format!("couldn't find the tin executable: {e}"))?;
+    let dir = helium_hosts_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("couldn't create {}: {e}", dir.display()))?;
+    let manifest = serde_json::json!({
+        "name": tin_core::bridge::HOST_NAME,
+        "description": "Tin's helper: records what Tin's extension reports.",
+        "path": exe,
+        "type": "stdio",
+        "allowed_origins": [format!("chrome-extension://{}/", tin_core::bridge::EXTENSION_ID)],
+    });
+    let path = dir.join(format!("{}.json", tin_core::bridge::HOST_NAME));
+    let text = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("couldn't write {}: {e}", path.display()))?;
+    let extension = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extension");
+    let extension = std::fs::canonicalize(&extension).unwrap_or(extension);
+    println!("Registered Tin's helper with Helium ({}).", path.display());
+    println!("It runs {}; run this again if that moves.", exe.display());
+    println!();
+    println!("Then load the extension once: open helium://extensions, turn on Developer mode,");
+    println!("click \"Load unpacked\" and pick {}", extension.display());
+    println!("Its ID should be {}.", tin_core::bridge::EXTENSION_ID);
+    Ok(())
+}
+
+fn extension_status() -> Outcome {
+    let data = Paths::from_env().data;
+    let browsers = tin_core::bridge::load_all(&data);
+    if browsers.is_empty() {
+        println!("The extension hasn't reported anything yet. Run `tin extension install`, load it, then switch tabs.");
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    for (browser, state) in browsers {
+        println!("{browser}: {} window(s)", state.windows.len());
+        for (id, tab) in &state.windows {
+            let focus = if state.focused == Some(*id) { " (focused)" } else { "" };
+            let age = now.saturating_sub(tab.at_ms) / 1000;
+            println!("  {}{focus}  {}  ({age}s ago)", one_line(&tab.title, 60), tab.url);
+        }
+    }
+    Ok(())
+}
+
 fn init() -> Outcome {
     let path = Paths::from_env().config;
     if path.exists() {
@@ -465,6 +565,7 @@ fn describe_page(p: &Page) -> String {
         PageSource::BrowserTab { browser, focused: true } => format!("{browser}'s tab"),
         PageSource::BrowserTab { browser, focused: false } => format!("{browser}'s last tab; window unknown"),
         PageSource::PickedPage { app } => format!("picked in {app}"),
+        PageSource::Extension { browser } => format!("{browser}, from Tin's extension"),
         PageSource::CapturedText => "from the text".to_owned(),
         PageSource::Manual => "given".to_owned(),
     };

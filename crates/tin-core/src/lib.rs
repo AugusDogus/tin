@@ -4,6 +4,7 @@
 //! note; [`intent`] routes the purpose to a project; [`store`] keeps captures as JSON files; and
 //! [`Tin`] ties them together for the CLI and the app.
 
+pub mod bridge;
 pub mod browser;
 pub mod capture;
 pub mod config;

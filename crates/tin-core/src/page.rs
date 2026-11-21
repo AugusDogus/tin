@@ -42,6 +42,8 @@ pub enum PageSource {
     },
     /// The page the user picked on screen, as the browser described it to accessibility tools.
     PickedPage { app: String },
+    /// The window's active tab, as Tin's browser extension reported it.
+    Extension { browser: String },
     /// A URL found in the captured text itself.
     CapturedText,
     /// Given explicitly (`--url`).

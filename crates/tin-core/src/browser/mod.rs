@@ -88,7 +88,7 @@ pub enum BrowserError {
 /// Whether a tab with this title is what a window with this title shows: browsers title their
 /// windows "<tab title> - <browser>", sometimes with a profile name between, and some insert
 /// invisible characters.
-fn titles_window(tab: &str, window: &str) -> bool {
+pub fn titles_window(tab: &str, window: &str) -> bool {
     let clean = |s: &str| -> String {
         s.chars()
             .filter(|c| !matches!(c, '\u{200b}'..='\u{200f}' | '\u{2060}' | '\u{feff}'))

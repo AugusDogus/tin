@@ -139,6 +139,18 @@ fn page(window: Option<&Window>, text: Option<&CapturedText>, notes: &mut Vec<No
     let app = window.and_then(|w| w.app.as_deref());
     match app {
         Some(app) if browser::is_browser_window(app) => {
+            // Tin's extension, when it's installed, knows each window's tab exactly.
+            let title = window.and_then(|w| w.title.as_deref());
+            let reported = title.and_then(|title| {
+                crate::bridge::load_all(&crate::Paths::from_env().data).into_iter().find_map(|(browser, state)| {
+                    state
+                        .tab_for(title)
+                        .map(|t| Page::new(t.url.clone(), Some(t.title.clone()), PageSource::Extension { browser }))
+                })
+            });
+            if reported.is_some() {
+                return reported;
+            }
             let scripted = platform::browser_tab(app).map_err(&mut note).ok().flatten();
             let tab = scripted.or_else(|| {
                 browser::active_tab(Some(app), window.and_then(|w| w.title.as_deref()))

@@ -3858,6 +3858,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "ctrlc",
+ "dirs",
  "serde",
  "serde_json",
  "tin-core",
