@@ -1,9 +1,17 @@
-//! Watches the keyboard system-wide for the double Shift tap.
+//! Watches the keyboard system-wide for the double Shift tap, and for Escape (the picker's way
+//! out where its overlays can't take the keyboard).
 //!
 //! Linux reads keyboards from `/dev/input` (evdev), which works the same on X11 and every Wayland
 //! desktop but needs the `input` group. Keyboards plugged in later are picked up by a rescan.
 //! macOS uses a Quartz event tap (rdev), which needs Accessibility permission. Only Shift presses
-//! and "some other key" leave the listener; nothing typed is kept.
+//! presses, Escape and "some other key" leave the listener; nothing typed is kept.
+
+/// What the listener heard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Heard {
+    DoubleShift,
+    Escape,
+}
 
 #[cfg(target_os = "linux")]
 pub use linux::watch;
@@ -20,14 +28,16 @@ mod linux {
 
     use evdev::{Device, EventSummary, KeyCode};
 
+    use super::Heard;
     use crate::double_tap::{DoubleTap, Press, Side};
 
     const RESCAN: Duration = Duration::from_secs(3);
 
     type Watched = Arc<Mutex<HashSet<PathBuf>>>;
 
-    /// Calls `fire` on every double Shift tap, or `fail` once if no keyboard can be read.
-    pub fn watch(fire: impl Fn() + Send + 'static, fail: impl Fn(String) + Send + 'static) {
+    /// Calls `heard` on every double Shift tap and Escape, or `fail` once if no keyboard can be
+    /// read.
+    pub fn watch(heard: impl Fn(Heard) + Send + 'static, fail: impl Fn(String) + Send + 'static) {
         let (tx, rx) = mpsc::channel::<Press>();
         let watched: Watched = Arc::default();
         std::thread::spawn(move || {
@@ -53,8 +63,11 @@ mod linux {
             let start = Instant::now();
             let mut tap = DoubleTap::default();
             for press in rx {
+                if press == Press::Escape {
+                    heard(Heard::Escape);
+                }
                 if tap.feed(press, start.elapsed()) {
-                    fire();
+                    heard(Heard::DoubleShift);
                 }
             }
         });
@@ -106,6 +119,7 @@ mod linux {
                     (KeyCode::KEY_LEFTSHIFT, _) => Press::ShiftUp(Side::Left),
                     (KeyCode::KEY_RIGHTSHIFT, 1) => Press::ShiftDown(Side::Right),
                     (KeyCode::KEY_RIGHTSHIFT, _) => Press::ShiftUp(Side::Right),
+                    (KeyCode::KEY_ESC, 1) => Press::Escape,
                     (_, 1) => Press::Other,
                     _ => continue,
                 };
@@ -123,10 +137,11 @@ mod macos {
 
     use rdev::{EventType, Key};
 
+    use super::Heard;
     use crate::double_tap::{DoubleTap, Press, Side};
 
-    /// Calls `fire` on every double Shift tap, or `fail` if macOS refuses the event tap.
-    pub fn watch(fire: impl Fn() + Send + 'static, fail: impl Fn(String) + Send + 'static) {
+    /// Calls `heard` on every double Shift tap and Escape, or `fail` if macOS refuses the event tap.
+    pub fn watch(heard: impl Fn(Heard) + Send + 'static, fail: impl Fn(String) + Send + 'static) {
         std::thread::spawn(move || {
             let start = Instant::now();
             let mut tap = DoubleTap::default();
@@ -136,11 +151,15 @@ mod macos {
                     EventType::KeyRelease(Key::ShiftLeft) => Press::ShiftUp(Side::Left),
                     EventType::KeyPress(Key::ShiftRight) => Press::ShiftDown(Side::Right),
                     EventType::KeyRelease(Key::ShiftRight) => Press::ShiftUp(Side::Right),
+                    EventType::KeyPress(Key::Escape) => Press::Escape,
                     EventType::KeyPress(_) => Press::Other,
                     _ => return,
                 };
+                if press == Press::Escape {
+                    heard(Heard::Escape);
+                }
                 if tap.feed(press, start.elapsed()) {
-                    fire();
+                    heard(Heard::DoubleShift);
                 }
             });
             if let Err(e) = result {

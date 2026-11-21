@@ -22,6 +22,8 @@ pub enum Side {
 pub enum Press {
     ShiftDown(Side),
     ShiftUp(Side),
+    /// Escape pressed: any other key to the gesture, and the picker's way out.
+    Escape,
     /// Any other key pressed.
     Other,
 }
@@ -55,7 +57,7 @@ impl DoubleTap {
     pub fn feed(&mut self, press: Press, now: Duration) -> bool {
         let quick = |since: Duration, limit: Duration| now.saturating_sub(since) <= limit;
         let (next, fired) = match (self.state, press) {
-            (_, Press::Other) => (State::Idle, false),
+            (_, Press::Other | Press::Escape) => (State::Idle, false),
             (State::FirstUp { side, at }, Press::ShiftDown(s)) if s == side && quick(at, MAX_GAP) => {
                 (State::SecondDown { side, at: now }, false)
             }
@@ -85,6 +87,18 @@ mod tests {
     fn run(events: &[(Press, u64)]) -> Vec<bool> {
         let mut tap = DoubleTap::default();
         events.iter().map(|&(p, ms)| tap.feed(p, Duration::from_millis(ms))).collect()
+    }
+
+    #[test]
+    fn escape_between_taps_cancels_like_any_other_key() {
+        let fired = run(&[
+            (ShiftDown(Left), 0),
+            (ShiftUp(Left), 80),
+            (Escape, 120),
+            (ShiftDown(Left), 200),
+            (ShiftUp(Left), 260),
+        ]);
+        assert_eq!(fired.last(), Some(&false));
     }
 
     #[test]

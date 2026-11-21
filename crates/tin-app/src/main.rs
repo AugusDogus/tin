@@ -134,6 +134,10 @@ fn run(launch: Launch) -> std::process::ExitCode {
         let (me, main) = (picker_handle.clone(), main_handle.clone());
         move || Picker::new(me, main, screens)
     });
+    let escape: Capture = {
+        let picker = picker_handle.clone();
+        Arc::new(move || picker.update(|p, _| p.escape()))
+    };
     let capture: Capture = Arc::new(move || picker_handle.update(|p, _| p.start()));
 
     let (on_message, capture_message) = (main_handle.clone(), capture.clone());
@@ -161,7 +165,7 @@ fn run(launch: Launch) -> std::process::ExitCode {
         }
     });
     register_shortcut(&main_handle, capture.clone());
-    watch_double_shift(&main_handle, capture);
+    watch_double_shift(&main_handle, capture, escape);
     // Overlays belong to an app's own loop: the card joins the main app's.
     if rune_picker {
         main.window(WindowSpec::from_app("picker", picker));
@@ -174,14 +178,20 @@ fn run(launch: Launch) -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
-/// Double-tap Shift to capture, unless `[app] double_shift = false`.
-fn watch_double_shift(handle: &rune::AppHandle<Ui>, capture: Capture) {
+/// Double-tap Shift to capture, unless `[app] double_shift = false`; Escape closes the picker.
+fn watch_double_shift(handle: &rune::AppHandle<Ui>, capture: Capture, escape: Capture) {
     let config = tin_core::config::Config::load(&tin_core::Paths::from_env().config);
     if !config.is_ok_and(|c| c.double_shift()) {
         return;
     }
     let fail = handle.clone();
-    keys::watch(move || capture(), move |message| fail.update(move |s, _| s.status = Some(Status::Error(message))));
+    keys::watch(
+        move |heard| match heard {
+            keys::Heard::DoubleShift => capture(),
+            keys::Heard::Escape => escape(),
+        },
+        move |message| fail.update(move |s, _| s.status = Some(Status::Error(message))),
+    );
 }
 
 /// Registers `[app] shortcut` from the config, once the app has started (registration before

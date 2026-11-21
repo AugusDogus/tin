@@ -64,7 +64,16 @@ struct Session {
     at: Option<(usize, (f32, f32))>,
     /// An area being dragged out: which monitor, and the area.
     drag: Option<(usize, Rect)>,
+    /// What each monitor last showed, so only the ones that change are drawn again.
+    shown: Vec<Option<Frame>>,
     done: Option<Done>,
+}
+
+/// What one monitor shows over its frozen picture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Frame {
+    highlight: Option<(Rect, String)>,
+    hint: bool,
 }
 
 /// One overlay's state: which frozen monitor it shows.
@@ -118,6 +127,7 @@ impl Screens {
             wheel: 0.0,
             at: None,
             drag: None,
+            shown: vec![None; snaps.len()],
             done: Some(Box::new(done)),
         });
         let overlays = lock(&self.shared.overlays).clone();
@@ -202,9 +212,26 @@ impl Shared {
         self.redraw();
     }
 
+    /// Draws again the monitors whose highlight or hint changed: usually just the one under
+    /// the pointer, and only when what's under it changes.
     fn redraw(&self) {
-        for overlay in lock(&self.overlays).iter() {
-            overlay.update(|_, tx| tx.instant());
+        let changed: Vec<usize> = {
+            let mut guard = lock(&self.session);
+            let Some(session) = guard.as_mut() else { return };
+            (0..session.snaps.len())
+                .filter(|&i| {
+                    let frame = Some(session.frame(i));
+                    let changed = session.shown[i] != frame;
+                    session.shown[i] = frame;
+                    changed
+                })
+                .collect()
+        };
+        let overlays = lock(&self.overlays);
+        for i in changed {
+            if let Some(overlay) = overlays.get(i) {
+                overlay.update(|_, tx| tx.instant());
+            }
         }
     }
 }
@@ -242,6 +269,10 @@ impl Session {
             Some((d, rect)) => (d == i).then(|| (rect, format!("{} × {}", rect.width, rect.height))),
             None => self.hovered(i).map(|(_, item)| (item.rect, item.label)),
         }
+    }
+
+    fn frame(&self, i: usize) -> Frame {
+        Frame { highlight: self.highlight(i), hint: self.at.map_or(i == 0, |(p, _)| p == i) }
     }
 
     /// The page the element worker last saw in window `w` of monitor `i`.
@@ -376,8 +407,7 @@ fn view(s: &Screen, _: &mut Cx<Screen>) -> El {
             .child(el().key("outline").absolute(x, y).w(w).h(h).border(2.0, ACCENT))
             .child(pill("label", label, x + 6.0, if y >= 30.0 { y - 28.0 } else { y + 6.0 }));
     }
-    let hint_here = session.at.map_or(s.index == 0, |(i, _)| i == s.index);
-    if hint_here {
+    if session.frame(s.index).hint {
         root = root.child(row().key("hint-row").absolute(0.0, 14.0).w_full().center().child(pill(
             "hint",
             HINT.into(),

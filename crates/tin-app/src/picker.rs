@@ -108,6 +108,15 @@ impl Picker {
         });
     }
 
+    /// Escape, heard from the keyboard itself: closes the Rune overlays, which can't take the
+    /// keyboard on Wayland. The card and `select.rs` hear their own.
+    pub fn escape(&mut self) {
+        #[cfg(target_os = "linux")]
+        if let (Stage::Selecting, Some(screens)) = (&self.stage, &self.screens) {
+            screens.cancel();
+        }
+    }
+
     /// Opens the card for a pick (also the headless scenes' way in).
     pub fn show(&mut self, pick: Pick, voice: Voice) {
         if let Some(image) = pick.snap.crop(pick.rect) {
