@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 tin-core = { path = "../tin-core" }
-rune = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
+rune = { git = "https://github.com/anomalyco/rune", rev = "563be4feacd80ab4b507a6deaef93afe1879321a" }
 
 [lints]
 workspace = true

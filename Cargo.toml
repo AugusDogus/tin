@@ -15,16 +15,6 @@ unsafe_code = "forbid"
 unwrap_used = "warn"
 expect_used = "warn"
 
-# Rune is pre-release: pin a `dev` revision and patch what Rune's own workspace patches, at the
-# same revision (Rune's README, "Depending on Rune"). Update all of these together.
-[patch.crates-io]
-winit = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
-sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
-parley_engine = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
-wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
-accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
-accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "eff95e80c328943deeeef0355485c06c3d71ecf0" }
-
 # The picker draws whole monitors in software; keep Tin's own crates fast in debug builds too.
 [profile.dev.package.tin-app]
 opt-level = 2
