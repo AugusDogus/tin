@@ -12,6 +12,7 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 use crate::capture::Window;
 use crate::screenshot::Rect;
+use crate::snapshot::{ElementContent, Link};
 
 /// AT-SPI's `ATSPI_STATE_SHOWING` bit: the element is on screen.
 const STATE_SHOWING: u32 = 25;
@@ -201,25 +202,41 @@ impl Accessibility {
         (chain, Stop { out_of_budget: budget == 0, ..Stop::default() })
     }
 
-    /// The addresses of the links inside `node` (itself included), in tree order, looking at
-    /// no more than `limit` elements.
-    pub fn links_in(&self, node: &Node, limit: usize) -> Vec<String> {
+    /// The text and links inside `node` (itself included), looking at no more than `limit`
+    /// elements.
+    pub fn content_in(&self, node: &Node, limit: usize) -> ElementContent {
+        let mut budget = limit;
         let mut links = Vec::new();
-        let mut queue = std::collections::VecDeque::from([node.clone()]);
-        let mut seen = 0;
-        while let Some(n) = queue.pop_front() {
-            seen += 1;
-            if seen > limit {
-                break;
+        let piece = self.piece(node, 0, &mut budget, &mut links);
+        ElementContent { text: tidy(&piece.text), links }
+    }
+
+    /// One element's text with its children's put back in. Browsers give an element's text with
+    /// a placeholder per child element; other toolkits give names and children.
+    fn piece(&self, node: &Node, depth: usize, budget: &mut usize, links: &mut Vec<Link>) -> Piece {
+        let role = self.role(node);
+        let mut children = Vec::new();
+        if depth < MAX_DEPTH {
+            for child in self.children(node) {
+                if *budget == 0 {
+                    break;
+                }
+                *budget -= 1;
+                children.push(self.piece(&child, depth + 1, budget, links));
             }
-            if self.role(&n) == "link"
-                && let Some(uri) = self.uri(&n)
-            {
-                links.push(uri);
-            }
-            queue.extend(self.children(&n));
         }
-        links
+        let own = self.call::<_, String>(node, "org.a11y.atspi.Text", "GetText", &(0i32, -1i32)).unwrap_or_default();
+        let mut text = stitch(&own, &children);
+        if text.trim().is_empty() {
+            text = self.name(node).unwrap_or_default();
+        }
+        // Links inside links don't happen, so a link after its children keeps the page's order.
+        if role == "link"
+            && let Some(url) = self.uri(node)
+        {
+            links.push(Link { url, text: Some(tidy(&text)).filter(|t| !t.is_empty()) });
+        }
+        Piece { inline: INLINE_ROLES.contains(&role.as_str()), text }
     }
 
     /// A link's address: AT-SPI's Hyperlink interface, else an `href` attribute.
@@ -279,6 +296,67 @@ fn topmost(has_inside: &[bool]) -> Option<usize> {
     has_inside.iter().rposition(|inside| *inside).or_else(|| has_inside.len().checked_sub(1))
 }
 
+/// Roles whose text runs on inside their parent's line; everything else is a block on its own lines.
+const INLINE_ROLES: &[&str] = &["link", "static", "text", "image", "superscript", "subscript", "mark", "label"];
+
+/// Where browsers put a child element in its parent's text (U+FFFC, the object replacement
+/// character).
+const PLACEHOLDER: char = '\u{FFFC}';
+
+/// An element's text, and whether it runs on in its parent's line.
+struct Piece {
+    text: String,
+    inline: bool,
+}
+
+/// An element's own text with its children's text put in place of its placeholders, in order.
+/// Children beyond the placeholders follow (toolkits without placeholders give only children).
+/// Blocks go on their own lines.
+fn stitch(own: &str, children: &[Piece]) -> String {
+    let place = |out: &mut String, child: &Piece| {
+        if child.inline {
+            out.push_str(&child.text);
+        } else {
+            out.push('\n');
+            out.push_str(&child.text);
+            out.push('\n');
+        }
+    };
+    let mut rest = children.iter();
+    let mut out = String::with_capacity(own.len());
+    for c in own.chars() {
+        match c {
+            PLACEHOLDER => {
+                if let Some(child) = rest.next() {
+                    place(&mut out, child);
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    for child in rest {
+        if child.inline {
+            out.push(' ');
+        }
+        place(&mut out, child);
+    }
+    out
+}
+
+/// Text as it reads: spaces collapsed, lines trimmed, empty lines and leftover placeholders gone.
+fn tidy(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            line.split(|c: char| c.is_whitespace() || c == PLACEHOLDER)
+                .filter(|w| !w.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// How many leading characters two strings share.
 fn shared_start(a: &str, b: &str) -> usize {
     a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count()
@@ -295,6 +373,34 @@ fn normalize(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn inline(text: &str) -> Piece {
+        Piece { text: text.into(), inline: true }
+    }
+
+    fn block(text: &str) -> Piece {
+        Piece { text: text.into(), inline: false }
+    }
+
+    #[test]
+    fn children_go_back_where_their_placeholders_are() {
+        // A paragraph with a link in it.
+        assert_eq!(stitch("Stock \u{FFFC} is here", &[inline("#1284")]), "Stock #1284 is here");
+        // A card: a heading, then a line of text with a link.
+        let card = stitch("\u{FFFC}\u{FFFC}", &[block("2004 Volkswagen PASSAT"), block("Black")]);
+        assert_eq!(tidy(&card), "2004 Volkswagen PASSAT\nBlack");
+    }
+
+    #[test]
+    fn children_without_placeholders_follow_the_text() {
+        assert_eq!(tidy(&stitch("", &[block("Yard"), block("Pick Your Part"), inline("")])), "Yard\nPick Your Part");
+        assert_eq!(tidy(&stitch("VIN", &[inline("WVW")])), "VIN WVW");
+    }
+
+    #[test]
+    fn tidy_trims_lines_and_drops_empty_ones() {
+        assert_eq!(tidy("  a   b \n\n \n c\u{FFFC}"), "a b\nc");
+    }
 
     #[test]
     fn the_topmost_sibling_with_something_inside_is_followed() {

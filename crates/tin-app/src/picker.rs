@@ -157,15 +157,19 @@ impl Picker {
             let picture = pick.snap.crop(pick.rect).ok_or("the selection is empty".to_owned()).and_then(|i| i.png());
             let app = pick.window.as_ref().and_then(|w| w.app.clone()).unwrap_or_else(|| "browser".into());
             let window_title = pick.window.as_ref().and_then(|w| w.title.clone());
-            // A tweet picked on X: its own link, from the links inside the picked element.
+            // What the picked element says and links to, kept as words beside its picture.
             #[cfg(target_os = "linux")]
-            let tweet = pick.node.as_ref().and_then(|node| {
+            let content = pick.node.as_ref().and_then(|node| {
                 let a11y = context::atspi::Accessibility::connect().ok()?;
-                let (handle, id) = tin_core::tweet::permalink(a11y.links_in(node, 400))?;
-                Some(Page::new(tin_core::tweet::url(&handle, &id), None, PageSource::PickedPage { app: app.clone() }))
+                Some(a11y.content_in(node, 400)).filter(|c| !c.is_empty())
             });
             #[cfg(not(target_os = "linux"))]
-            let tweet: Option<Page> = None;
+            let content: Option<tin_core::snapshot::ElementContent> = None;
+            // A tweet picked on X: its own link, from the links inside the picked element.
+            let tweet = content.as_ref().and_then(|c| {
+                let (handle, id) = tin_core::tweet::permalink(c.links.iter().map(|l| &l.url))?;
+                Some(Page::new(tin_core::tweet::url(&handle, &id), None, PageSource::PickedPage { app: app.clone() }))
+            });
             let draft = Draft {
                 // The tweet picked; else the page the browser said was picked; else the browser's
                 // session file.
@@ -185,7 +189,12 @@ impl Picker {
                         .map(|s| CapturedText { text: s.text, from: TextSource::Selection })
                 }),
                 screenshot: picture.as_ref().ok().cloned(),
-                selection: Some(Selection { output: pick.snap.output.clone(), rect: pick.rect, kind: pick.kind }),
+                selection: Some(Selection {
+                    output: pick.snap.output.clone(),
+                    rect: pick.rect,
+                    kind: pick.kind,
+                    content,
+                }),
                 intent: Intent { said: Some(said), ..Intent::default() },
                 ..Draft::default()
             };

@@ -33,6 +33,32 @@ pub struct Selection {
     /// In points from the monitor's top-left.
     pub rect: Rect,
     pub kind: SelectionKind,
+    /// What a picked element holds, when its app describes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<ElementContent>,
+}
+
+/// A picked element's text and links, read from its app's accessibility tree, so what was on
+/// screen is kept as words and addresses, not only as a picture.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ElementContent {
+    pub text: String,
+    /// In the order they appear.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<Link>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Link {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+impl ElementContent {
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty() && self.links.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

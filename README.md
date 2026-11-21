@@ -41,7 +41,7 @@ to be in the `input` group (`sudo usermod -aG input $USER`, then log in again). 
 Accessibility permission. Tin only looks at Shift and "some other key"; it keeps nothing you type.
 Elements come from the app's accessibility tree when it publishes one (GTK, Qt, Firefox;
 Chromium and Electron apps started with `--force-renderer-accessibility`), with their role and
-name saved in the capture. Tin switches the session's accessibility bus on when it starts and
+name saved in the capture, along with the element's text and links (`selection.content`). Tin switches the session's accessibility bus on when it starts and
 before each pick. Anything else (terminals, games, apps that publish nothing) is cut into
 blocks from its pixels. The picker needs COSMIC for now: it reads windows and the screens through COSMIC's protocols,
 without a portal or prompt, and draws over each monitor with a layer-shell surface. macOS isn't

@@ -537,6 +537,15 @@ fn print_capture(c: &Capture, file: &str) {
         }
         println!("  kept    {}", t.raw.display());
     }
+    if let Some(content) = c.selection.as_ref().and_then(|s| s.content.as_ref()) {
+        if !content.text.is_empty() {
+            println!("  shows   {}", one_line(&content.text, 200));
+        }
+        for link in &content.links {
+            let text = link.text.as_deref().map(|t| format!("{}  ", one_line(t, 40))).unwrap_or_default();
+            println!("  link    {text}{}", link.url);
+        }
+    }
     if let Some(s) = &c.screenshot {
         println!("  picture {} ({}×{})", s.path.display(), s.width, s.height);
     }
