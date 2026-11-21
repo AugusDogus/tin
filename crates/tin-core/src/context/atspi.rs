@@ -156,53 +156,49 @@ impl Accessibility {
         Some((frame, extents))
     }
 
-    /// The elements under a point (window coordinates), outermost first, below `frame`. Every
-    /// child under the point is explored (within a budget of calls) and [`topmost`] picks which
-    /// to follow.
+    /// The elements under a point (window coordinates), outermost first, below `frame`. At each
+    /// level [`topmost`] picks which child under the point to follow.
     pub fn chain_at(&self, frame: &Node, x: i32, y: i32) -> Vec<Element> {
         let mut budget = MAX_VISITS;
-        self.descend(frame, x, y, 0, &mut budget)
+        let mut chain = Vec::new();
+        let mut node = frame.clone();
+        while chain.len() < MAX_DEPTH {
+            let under = self.under(&node, x, y, &mut budget);
+            // One step of look-ahead, not a full search: pages nest dozens of same-sized
+            // wrappers, and exploring every one of them multiplies at each level.
+            let has_inside: Vec<bool> =
+                under.iter().map(|(child, _)| !self.under(child, x, y, &mut budget).is_empty()).collect();
+            let Some((child, rect)) = topmost(&has_inside).and_then(|i| under.into_iter().nth(i)) else { break };
+            let role = self.role(&child);
+            let page = role.starts_with("document").then(|| self.page(&child)).flatten();
+            chain.push(Element { rect, role, name: self.name(&child), page });
+            node = child;
+        }
+        chain
     }
 
-    fn descend(&self, node: &Node, x: i32, y: i32, depth: usize, budget: &mut usize) -> Vec<Element> {
-        if depth >= MAX_DEPTH || *budget == 0 {
-            return Vec::new();
-        }
-        let mut under: Vec<(Node, Rect)> = Vec::new();
+    /// The children of `node` that are showing and contain the point, in tree order, within
+    /// the call budget. Toolkits keep hidden views in the tree (Chromium has hidden containers
+    /// over the page); only what's showing can be under the pointer.
+    fn under(&self, node: &Node, x: i32, y: i32, budget: &mut usize) -> Vec<(Node, Rect)> {
+        let mut under = Vec::new();
         for child in self.children(node) {
             if *budget == 0 {
                 break;
             }
             *budget -= 1;
-            // Toolkits keep hidden views in the tree (Chromium has hidden containers over the
-            // page); only what's showing can be under the pointer.
             if let Some(r) = self.extents(&child).filter(|r| r.contains(x, y))
                 && self.showing(&child)
             {
                 under.push((child, r));
             }
         }
-        let explored: Vec<(Node, Rect, Vec<Element>)> = under
-            .into_iter()
-            .map(|(child, rect)| {
-                let below = self.descend(&child, x, y, depth + 1, budget);
-                (child, rect, below)
-            })
-            .collect();
-        let Some(i) = topmost(&explored.iter().map(|(_, _, below)| !below.is_empty()).collect::<Vec<_>>()) else {
-            return Vec::new();
-        };
-        let Some((child, rect, below)) = explored.into_iter().nth(i) else { return Vec::new() };
-        let role = self.role(&child);
-        let page = role.starts_with("document").then(|| self.page(&child)).flatten();
-        let mut chain = vec![Element { rect, role, name: self.name(&child), page }];
-        chain.extend(below);
-        chain
+        under
     }
 }
 
-/// Which of the siblings under the point to follow, given whether each has anything under the
-/// point inside it. Later siblings are drawn over earlier ones (an open menu over the view
+/// Which of the siblings under the point to follow, given whether each has a showing child under
+/// the point. Later siblings are drawn over earlier ones (an open menu over the view
 /// behind it), so the last one with something inside wins; Chromium's empty same-sized panels
 /// beside the page are passed over. Among leaves, the last one wins.
 fn topmost(has_inside: &[bool]) -> Option<usize> {

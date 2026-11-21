@@ -95,6 +95,8 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
         let win = target.rect;
         let mut items = vec![Item { rect: win, label: window_label(&target.window), kind: SelectionKind::Window }];
         let mut page = None;
+        // How deep the accessibility walk went before filtering, for the log.
+        let mut raw: Option<(usize, Option<String>)> = None;
 
         if let Some(a11y) = &a11y {
             let frame = frames.entry(key.clone()).or_insert_with(|| {
@@ -110,7 +112,9 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
             });
             if let Some((node, (dx, dy))) = frame {
                 let (x, y) = (request.point.0 - win.x + *dx, request.point.1 - win.y + *dy);
-                for e in a11y.chain_at(node, x, y) {
+                let found = a11y.chain_at(node, x, y);
+                raw = Some((found.len(), found.last().map(|e| e.role.clone())));
+                for e in found {
                     // The innermost page wins (a frame inside a page is its own page).
                     if e.page.is_some() {
                         page.clone_from(&e.page);
@@ -144,7 +148,7 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
         }
 
         let chain = Chain { output: request.snap.output.clone(), window: request.window, items, page };
-        log.write(&request, &chain, a11y.is_some());
+        log.write(&request, &chain, a11y.is_some(), raw.as_ref());
         *answer.lock().unwrap_or_else(PoisonError::into_inner) = Some(chain);
         wake();
     }
@@ -161,7 +165,7 @@ impl Log {
         Log(std::fs::File::create(path).ok())
     }
 
-    fn write(&mut self, request: &Request, chain: &Chain, accessibility: bool) {
+    fn write(&mut self, request: &Request, chain: &Chain, accessibility: bool, raw: Option<&(usize, Option<String>)>) {
         use std::io::Write;
         let Some(file) = &mut self.0 else { return };
         let window = request.snap.windows.get(request.window).map(|w| window_label(&w.window)).unwrap_or_default();
@@ -177,11 +181,13 @@ impl Log {
         } else {
             "pixels"
         };
+        let raw = raw.map(|(n, deepest)| format!(", walk {n} deep to {}", deepest.as_deref().unwrap_or("?")));
         let _ = writeln!(
             file,
-            "{} {:?} in {window:?} via {source}, page {:?}",
+            "{} {:?} in {window:?} via {source}{}, page {:?}",
             request.snap.output,
             request.point,
+            raw.unwrap_or_default(),
             chain.page.as_ref().map(|(u, _)| u)
         );
         for item in &chain.items {
