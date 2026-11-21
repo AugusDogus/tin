@@ -279,14 +279,17 @@ mod tests {
 
     #[test]
     fn copy_adds_the_page_url_once() {
-        let page = Page::new("https://blog.com/", Some("BLOG".into()), PageSource::Manual);
+        let page = Page::new("https://example.com/", Some("Example".into()), PageSource::Manual);
         let text = |t: &str| Some(CapturedText { text: t.into(), from: TextSource::Selection });
         let make = |text, page| {
             Capture::new(Draft { text, page, ..Draft::default() }, at(0)).unwrap_or_else(|e| panic!("{e}"))
         };
-        assert_eq!(make(text("Pricing"), Some(page.clone())).clipboard_text(), "Pricing\n\nhttps://blog.com/");
-        assert_eq!(make(text("see https://blog.com/"), Some(page.clone())).clipboard_text(), "see https://blog.com/");
-        assert_eq!(make(None, Some(page)).clipboard_text(), "https://blog.com/");
+        assert_eq!(make(text("Pricing"), Some(page.clone())).clipboard_text(), "Pricing\n\nhttps://example.com/");
+        assert_eq!(
+            make(text("see https://example.com/"), Some(page.clone())).clipboard_text(),
+            "see https://example.com/"
+        );
+        assert_eq!(make(None, Some(page)).clipboard_text(), "https://example.com/");
     }
 
     #[test]

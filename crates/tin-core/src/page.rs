@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn find_url_takes_the_first_url_without_trailing_punctuation() {
-        assert_eq!(Page::find_url("see (https://blog.com/docs). ok"), Some("https://blog.com/docs"));
+        assert_eq!(Page::find_url("see (https://example.com/docs). ok"), Some("https://example.com/docs"));
         assert_eq!(Page::find_url("no links here, just https://"), None);
         assert_eq!(Page::find_url("plain text"), None);
     }

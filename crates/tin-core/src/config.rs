@@ -26,7 +26,7 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct RouteConfig {
     pub name: String,
-    /// Other ways to say it: `ask blog`, `blog.com`.
+    /// Other ways to say it: `for the blog`, `example.com`.
     #[serde(default)]
     pub aliases: Vec<String>,
     /// A project folder. A route without one is a topic: it tags, but names no project.
@@ -72,7 +72,7 @@ pub enum ConfigError {
     Parse { path: PathBuf, source: Box<toml::de::Error> },
 }
 
-pub const STARTER: &str = r#"# Tin's config. Routes let you say what a capture is for ("ask blog", "game dev")
+pub const STARTER: &str = r#"# Tin's config. Routes let you say what a capture is for ("for the blog", "game dev")
 # and have it land tagged for the right project.
 
 # Folders whose subfolders count as existing projects (say "for <folder name>").
@@ -80,7 +80,7 @@ pub const STARTER: &str = r#"# Tin's config. Routes let you say what a capture i
 
 # [[route]]
 # name = "blog"
-# aliases = ["ask blog", "blog.com"]
+# aliases = ["for the blog", "example.com"]
 # path = "~/dev/blog"                 # a project; leave out for a topic tag
 # hook = ["opencode", "run", "--dir", "~/dev/blog", "Triage the capture on stdin"]
 
@@ -152,7 +152,7 @@ mod tests {
             .join("\n");
         let config: Config = toml::from_str(&uncommented).unwrap_or_else(|e| panic!("{e}\n{uncommented}"));
         assert_eq!(config.routes.len(), 2);
-        assert_eq!(config.routes[0].aliases, ["ask blog", "blog.com"]);
+        assert_eq!(config.routes[0].aliases, ["for the blog", "example.com"]);
         assert_eq!(config.app.shortcut.as_deref(), Some("ctrl+alt+c"));
         assert!(config.double_shift());
     }

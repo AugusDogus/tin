@@ -26,7 +26,7 @@ fn composer(s: &mut Ui) {
         screenshot: None,
         notes: Vec::new(),
     });
-    s.purpose = TextEdit::new("ask blog about this #pricing");
+    s.purpose = TextEdit::new("for the blog #drafts");
 }
 
 fn heard(s: &mut Ui) {
@@ -141,7 +141,7 @@ pub mod picker {
             s,
             true,
             Voice::Heard(VoiceNote {
-                transcript: "This tweet is the UX I want for Tin, ask blog whether we can do the same.".into(),
+                transcript: "This is the UX I want. Save it for the blog.".into(),
                 engine: "hex".into(),
             }),
         );

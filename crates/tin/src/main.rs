@@ -73,7 +73,7 @@ enum ExtensionAction {
 
 #[derive(Args)]
 struct CaptureArgs {
-    /// What it's for: "ask blog", "for game dev", "new project: pixel farm".
+    /// What it's for: "for the blog", "game dev", "new project: pixel farm".
     #[arg(long = "for", short = 'f', value_name = "PURPOSE")]
     purpose: Option<String>,
     /// A typed note to keep with it.
@@ -174,7 +174,7 @@ fn run(command: Command) -> Outcome {
             let tin = open()?;
             let purpose = purpose.join(" ");
             if purpose.trim().is_empty() {
-                return Err("say what it's for, e.g. `tin route last ask blog`".into());
+                return Err("say what it's for, e.g. `tin route last for the blog`".into());
             }
             let id = tin.store.resolve(&id).map_err(|e| e.to_string())?;
             let saved = tin.reroute(&id, &purpose).map_err(|e| e.to_string())?;

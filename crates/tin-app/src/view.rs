@@ -98,7 +98,7 @@ fn composer(s: &Ui, c: &Composer, l: &Look) -> El {
         .fill(l.t.bg)
         .color(l.t.text)
         .caret(l.accent, l.accent.alpha(0.3))
-        .placeholder("What's it for? ask blog, game dev, new project: …", l.t.text_secondary)
+        .placeholder("What's it for? the blog, game dev, new project: …", l.t.text_secondary)
         .on_edit(|s: &mut Ui| &mut s.purpose)
         .on_submit(|s: &mut Ui, tx| s.save(tx));
 

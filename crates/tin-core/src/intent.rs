@@ -1,6 +1,6 @@
 //! Why something was saved: what the user said it's for, and where that routes it.
 //!
-//! The user types or says a purpose ("ask blog", "for game dev", "new project: pixel farm").
+//! The user types or says a purpose ("for the blog", "game dev", "new project: pixel farm").
 //! Tin matches it against routes from the config and the user's project folders, so a capture
 //! lands tagged for an existing project (and which one), a new project, or a topic.
 
@@ -77,7 +77,7 @@ pub enum RouteKind {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Routes(Vec<Route>);
 
-/// Words that introduce a project folder's name ("for tin", "ask blog"). Folder names are often
+/// Words that introduce a project folder's name ("for tin", "ask tin"). Folder names are often
 /// ordinary words ("notes", "site"), so a folder found on disk matches only after one of these,
 /// or as the whole purpose. Configured routes match anywhere.
 const CUES: [&str; 12] = ["for", "to", "in", "into", "on", "ask", "project", "re", "about", "with", "add", "tell"];
@@ -217,7 +217,7 @@ fn new_project_name(tokens: &[String]) -> Option<Option<String>> {
     Some((!rest.is_empty()).then(|| rest.join(" ")))
 }
 
-/// Lowercase alphanumeric words: `Ask BLOG.com!` is `ask blog com`.
+/// Lowercase alphanumeric words: `See Example.com!` is `see example com`.
 fn words(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect()
 }
@@ -237,7 +237,7 @@ mod tests {
         let project = |p: &str| RouteKind::Project { path: PathBuf::from(p), discovered: false };
         let found = |p: &str| RouteKind::Project { path: PathBuf::from(p), discovered: true };
         Routes::new(vec![
-            Route::new("blog", &["ask blog".into(), "blog.com".into()], project("/dev/blog"), None),
+            Route::new("blog", &["for the blog".into(), "example.com".into()], project("/dev/blog"), None),
             Route::new("game dev", &[], RouteKind::Topic, None),
             Route::new("tin", &[], found("/dev/tin"), None),
             Route::new("notes", &[], found("/dev/notes"), None),
@@ -246,18 +246,18 @@ mod tests {
 
     #[test]
     fn an_alias_routes_to_its_project() {
-        let intent = routes().resolve(Some("Ask BLOG about pricing"), None);
+        let intent = routes().resolve(Some("Save this For the Blog"), None);
         assert_eq!(
             intent.target,
-            Target::Project { name: "blog".into(), path: Some("/dev/blog".into()), matched: "ask blog".into() }
+            Target::Project { name: "blog".into(), path: Some("/dev/blog".into()), matched: "for the blog".into() }
         );
         assert_eq!(intent.tags, ["blog"]);
-        assert_eq!(intent.said.as_deref(), Some("Ask BLOG about pricing"));
+        assert_eq!(intent.said.as_deref(), Some("Save this For the Blog"));
     }
 
     #[test]
     fn a_domain_routes_too() {
-        assert_eq!(routes().resolve(Some("blog.com"), None).target.name(), Some("blog"));
+        assert_eq!(routes().resolve(Some("example.com"), None).target.name(), Some("blog"));
     }
 
     #[test]
@@ -286,14 +286,14 @@ mod tests {
 
     #[test]
     fn the_voice_note_routes_when_nothing_was_typed() {
-        let intent = routes().resolve(None, Some("This one is for blog, the onboarding flow"));
+        let intent = routes().resolve(None, Some("This one is for the blog, the post about shaders"));
         assert_eq!(intent.target.name(), Some("blog"));
         assert_eq!(intent.said, None);
     }
 
     #[test]
     fn the_typed_purpose_beats_the_voice_note() {
-        let intent = routes().resolve(Some("for tin"), Some("ask blog"));
+        let intent = routes().resolve(Some("for tin"), Some("for the blog"));
         assert_eq!(intent.target.name(), Some("tin"));
         assert_eq!(intent.tags, ["tin", "blog"]);
     }
