@@ -1,14 +1,19 @@
-# Tin
-
-Capture what you're looking at, say what it's for, and hand it to an agent.
+<div align="center">
+  <h1>Tin</h1>
+  <p>Capture what you're looking at, say what it's for, and hand it to an agent.</p>
+  <p><a href="#install">Get started</a> · <a href="docs/media/capture-demo.mp4">Play demo in 1080p60</a></p>
+  <a href="docs/media/capture-demo.mp4"><img src="docs/media/capture-demo.webp" width="960" alt="Double-tap Shift on a post on X, pick the post, say it's for the platformer and press Enter. Tin saves the post's link, the voice note, the post's text and its video. A recreation of Tin's interface with a made-up account. Play the 14-second demo."></a>
+</div>
 
 Tin is an open-source take on [Copper](https://shadcn.com/copper): a to-do list, clipboard and
-scratchpad for AI-assisted work. Press a shortcut and Tin grabs your selected text and the page
-you're on (a tweet is recognised as one). Add a voice note with [Hex](https://github.com/anomalyco/hex),
+scratchpad for AI-assisted work. Double-tap Shift and pick what you're looking at (a window,
+something inside it, or an area), and Tin keeps it with the page it's on (a tweet is recognised
+as one). Add a voice note with [Hex](https://github.com/anomalyco/hex),
 then type or say what it's for ("ask blog", "game dev", "new project: pixel farm"). Tin routes it
 to a project and saves it as a plain JSON file that agents can read, act on and check off.
 
-Linux and macOS. Everything stays on your machine: no account, no sync, no network.
+Linux and macOS. Everything stays on your machine: no account, no sync. Tin only goes online to
+keep copies of a tweet or of a page's images and videos you captured.
 
 ## Install
 
