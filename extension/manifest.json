@@ -1,12 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Tin",
-  "version": "0.1.0",
-  "description": "Tells Tin which page each window shows, what's selected in it, and the tweets X loads, so captures know what you were looking at and keep tweets whole.",
+  "version": "0.2.0",
+  "description": "Tells Tin which page each window shows, what's selected in it, the tweets X loads, and the images and videos where you pick, so captures know what you were looking at and keep it.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1p55G32KW5FfBBLOHB2VnJTmTNFOt35fz46fjf0a4LPz5n9gqbY4isHgwdl4irVDFpZJwRS9bWVIQydhZ/6EE53hZGI+aa/iF3KNCOqwypI8yDgKVt9cBb8/tznFfOpRH4J0IPXgkT919885/nPSxetNVC46vQHvfPZLpjwdM08yLiqua1phMFZAiPZCTM7UGCMm8eA66xWzbNs2zVqIOh+vLKJii+5VEQ4XkYq+k4N2m5xvsxVeOpFg/yDRfiBOgmC9j4olujDJTNVC+aYsKHKZAzKWMYTLCXiMOHsj9fqicmSbeDANnKIELXBAT3wbreDpZ3Mk7qmNH3upp7E0rQIDAQAB",
   "permissions": [
     "tabs",
-    "nativeMessaging"
+    "nativeMessaging",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"

@@ -208,7 +208,7 @@ impl Accessibility {
         let mut budget = limit;
         let mut links = Vec::new();
         let piece = self.piece(node, 0, &mut budget, &mut links);
-        ElementContent { text: tidy(&piece.text), links }
+        ElementContent { text: tidy(&piece.text), links, media: Vec::new() }
     }
 
     /// One element's text with its children's put back in. Browsers give an element's text with

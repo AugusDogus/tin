@@ -114,11 +114,16 @@ on_capture = ["notify-send", "Tin", "Captured"]
 
 - which page each window shows, so captures don't guess from session files;
 - what's selected in the page (COSMIC doesn't share the selection with other apps);
-- the tweets X's own app loads, whole: long posts in full, with their photo and video URLs.
+- the tweets X's own app loads, whole: long posts in full, with their photo and video URLs;
+- when you pick part of a page, the images and videos there. Tin downloads them into
+  `<id>.media/` (`page-1.jpg`, …) and lists them in the capture (`selection.content.media`).
+  Streamed videos (`blob:` addresses) can't be downloaded; the capture says so and its picture
+  shows them.
 
 It talks to Tin through native messaging: the browser runs the `tin` command as a helper, which
-writes what it hears to `<data>/browser/` (seen tweets are kept 14 days). No network port is
-opened. Set it up once:
+writes what it hears to `<data>/browser/` (seen tweets are kept 14 days). For Tin's questions the
+extension keeps one helper open, which listens on `$XDG_RUNTIME_DIR/tin-<browser>.sock`. No
+network port is opened. Set it up once:
 
 ```sh
 tin extension install   # registers the helper with Helium

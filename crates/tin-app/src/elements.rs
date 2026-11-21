@@ -13,7 +13,7 @@ use tin_core::capture::Window;
 use tin_core::context::atspi::{Accessibility, Node, Stop};
 use tin_core::regions::Region;
 use tin_core::screenshot::Rect;
-use tin_core::snapshot::{SelectionKind, Snapshot};
+use tin_core::snapshot::{SelectionKind, Snapshot, WebPage};
 
 /// One thing the pointer is over, from the window inward.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,8 +32,8 @@ pub struct Chain {
     pub output: String,
     pub window: usize,
     pub items: Vec<Item>,
-    /// The web page under the point, when a browser described one: its address and title.
-    pub page: Option<(String, Option<String>)>,
+    /// The web page under the point, when a browser described one.
+    pub page: Option<WebPage>,
 }
 
 impl Chain {
@@ -118,11 +118,11 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
                 let (found, why) = a11y.chain_and_stop(node, x, y);
                 raw = Some((found.len(), found.last().map(|e| e.role.clone()), why));
                 for e in found {
-                    // The innermost page wins (a frame inside a page is its own page).
-                    if e.page.is_some() {
-                        page.clone_from(&e.page);
-                    }
                     let rect = Rect { x: e.rect.x - *dx + win.x, y: e.rect.y - *dy + win.y, ..e.rect };
+                    // The innermost page wins (a frame inside a page is its own page).
+                    if let Some((url, title)) = e.page {
+                        page = Some(WebPage { url, title, rect });
+                    }
                     // AccessKit apps (GPUI, Rune) don't answer GetRoleName: the role is empty there.
                     let role = Some(e.role).filter(|r| !r.is_empty());
                     if !meaningful(role.as_deref(), e.name.as_deref()) {
@@ -207,7 +207,7 @@ impl Log {
             request.snap.output,
             request.point,
             raw.unwrap_or_default(),
-            chain.page.as_ref().map(|(u, _)| u)
+            chain.page.as_ref().map(|p| &p.url)
         );
         for item in &chain.items {
             let r = item.rect;

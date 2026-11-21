@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::capture::Window;
+use crate::media::Media;
 use crate::screenshot::{Image, Rect};
 
 /// One monitor at one moment.
@@ -46,6 +47,18 @@ pub struct ElementContent {
     /// In the order they appear.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<Link>,
+    /// Images and videos in it, from Tin's browser extension, with copies beside the capture.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media: Vec<Media>,
+}
+
+/// A web page shown in a window, as its browser described it, and where it sat on the monitor
+/// (in points).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebPage {
+    pub url: String,
+    pub title: Option<String>,
+    pub rect: Rect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,7 +70,7 @@ pub struct Link {
 
 impl ElementContent {
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.links.is_empty()
+        self.text.is_empty() && self.links.is_empty() && self.media.is_empty()
     }
 }
 

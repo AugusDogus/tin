@@ -426,9 +426,23 @@ fn native_host() -> Outcome {
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "browser".into());
-    let (mut input, mut output) = (std::io::stdin().lock(), std::io::stdout().lock());
-    while let Some(frame) = tin_core::bridge::read_frame(&mut input).map_err(|e| e.to_string())? {
-        let reply = match serde_json::from_slice::<tin_core::bridge::Message>(&frame) {
+    let mut input = std::io::stdin().lock();
+    // The port the extension keeps open for Tin's questions starts with `serve`; the rest are
+    // one message each.
+    let Some(first) = tin_core::bridge::read_frame(&mut input).map_err(|e| e.to_string())? else { return Ok(()) };
+    if serde_json::from_slice::<serde_json::Value>(&first).is_ok_and(|v| v["type"] == "serve") {
+        let socket = tin_core::bridge::ask::socket_path(&browser);
+        return tin_core::bridge::ask::relay(&socket, input, std::io::stdout(), |frame| {
+            if let Ok(message) = serde_json::from_slice(&frame) {
+                let _ = tin_core::bridge::record(&data, &browser, message);
+            }
+        })
+        .map_err(|e| format!("Tin's helper couldn't serve questions on {}: {e}", socket.display()));
+    }
+    let mut output = std::io::stdout().lock();
+    let mut frame = Some(first);
+    while let Some(message) = frame {
+        let reply = match serde_json::from_slice::<tin_core::bridge::Message>(&message) {
             Ok(message) => match tin_core::bridge::record(&data, &browser, message) {
                 Ok(()) => serde_json::json!({ "ok": true }),
                 Err(e) => serde_json::json!({ "ok": false, "error": format!("couldn't record it: {e}") }),
@@ -436,6 +450,7 @@ fn native_host() -> Outcome {
             Err(e) => serde_json::json!({ "ok": false, "error": format!("not a message Tin knows: {e}") }),
         };
         tin_core::bridge::write_frame(&mut output, reply.to_string().as_bytes()).map_err(|e| e.to_string())?;
+        frame = tin_core::bridge::read_frame(&mut input).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -544,6 +559,17 @@ fn print_capture(c: &Capture, file: &str) {
         for link in &content.links {
             let text = link.text.as_deref().map(|t| format!("{}  ", one_line(t, 40))).unwrap_or_default();
             println!("  link    {text}{}", link.url);
+        }
+        for m in &content.media {
+            let kind = match m.kind {
+                tin_core::media::MediaKind::Photo => "photo",
+                tin_core::media::MediaKind::Video => "video",
+            };
+            match &m.kept {
+                tin_core::media::Kept::File { path } => println!("  {kind:<7} {}", path.display()),
+                tin_core::media::Kept::NotYet => println!("  {kind:<7} {}  (not downloaded yet)", m.url),
+                tin_core::media::Kept::Missing { reason } => println!("  {kind:<7} {}  (not kept: {reason})", m.url),
+            }
         }
     }
     if let Some(s) = &c.screenshot {

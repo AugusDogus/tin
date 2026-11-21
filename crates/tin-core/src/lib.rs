@@ -12,6 +12,7 @@ pub mod context;
 pub mod hex;
 pub mod hook;
 pub mod intent;
+pub mod media;
 pub mod page;
 pub mod regions;
 pub mod screenshot;
@@ -150,6 +151,19 @@ impl Tin {
         let archive = tweet::archive(&status, self.store.dir(), id.as_str(), &tweet::Seen { tweet, quoted })?;
         capture.tweet = Some(archive);
         self.store.save(&capture)?;
+        Ok(capture)
+    }
+
+    /// Downloads the images and videos found where the capture was picked into `<id>.media/`,
+    /// and records which were kept.
+    pub fn keep_media(&self, id: &CaptureId) -> Result<Capture, StoreError> {
+        let mut capture = self.store.load(id)?;
+        let referrer = capture.page.as_ref().map(|p| p.url.clone());
+        if let Some(content) = capture.selection.as_mut().and_then(|s| s.content.as_mut()) {
+            let dir = self.store.dir().join(format!("{}.media", id.as_str()));
+            media::keep(&mut content.media, &dir, referrer.as_deref());
+            self.store.save(&capture)?;
+        }
         Ok(capture)
     }
 

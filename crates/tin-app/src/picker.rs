@@ -8,12 +8,14 @@ use rune::{
     AppHandle, Color, Cx, El, Key, KeyEvent, Pixels, SurfaceFit, TextEdit, Tx, col, el, row, spacer, text, text_input,
 };
 use tin_core::Tin;
+use tin_core::bridge::ask::{Area, AskError};
 use tin_core::capture::{CapturedText, Draft, TextSource, Window};
 use tin_core::context;
 use tin_core::intent::Intent;
+use tin_core::media::{Kept, Media};
 use tin_core::page::{Page, PageSource};
 use tin_core::screenshot::Rect;
-use tin_core::snapshot::{Selection, SelectionKind, Snapshot};
+use tin_core::snapshot::{ElementContent, Selection, SelectionKind, Snapshot, WebPage};
 
 use crate::ui::{Status, Ui, Voice};
 
@@ -35,8 +37,8 @@ pub struct Pick {
     pub rect: Rect,
     pub kind: SelectionKind,
     pub window: Option<Window>,
-    /// The web page picked from, as the browser described it: its address and title.
-    pub page: Option<(String, Option<String>)>,
+    /// The web page picked from, as the browser described it.
+    pub page: Option<WebPage>,
     /// The app's own element picked, when it came from the accessibility tree.
     pub node: Option<ElementRef>,
 }
@@ -170,12 +172,25 @@ impl Picker {
                 let (handle, id) = tin_core::tweet::permalink(c.links.iter().map(|l| &l.url))?;
                 Some(Page::new(tin_core::tweet::url(&handle, &id), None, PageSource::PickedPage { app: app.clone() }))
             });
+            // The images and videos where it was picked, from Tin's extension. A tweet's are kept
+            // with the tweet instead.
+            let found = match (&tweet, &pick.page, window_title.as_deref()) {
+                (None, Some(page), Some(title)) => page_media(page, pick.rect, title),
+                _ => Ok(Vec::new()),
+            };
+            let media_error = found.as_ref().err().map(ToString::to_string);
+            let content = match (content, found.unwrap_or_default()) {
+                (content, media) if media.is_empty() => content,
+                (Some(content), media) => Some(ElementContent { media, ..content }),
+                (None, media) => Some(ElementContent { media, ..ElementContent::default() }),
+            };
+            let has_media = content.as_ref().is_some_and(|c| !c.media.is_empty());
             let draft = Draft {
                 // The tweet picked; else the page the browser said was picked; else the browser's
                 // session file.
                 page: match (tweet, pick.page, &pick.window) {
                     (Some(tweet), ..) => Some(tweet),
-                    (None, Some((url, title)), _) => Some(Page::new(url, title, PageSource::PickedPage { app })),
+                    (None, Some(page), _) => Some(Page::new(page.url, page.title, PageSource::PickedPage { app })),
                     (None, None, window) => window.as_ref().and_then(context::page_for),
                 },
                 window: pick.window,
@@ -199,32 +214,51 @@ impl Picker {
                 ..Draft::default()
             };
             let saved = tin.save(draft);
-            let status = match (picture, &saved) {
-                (_, Err(e)) => Status::Error(e.to_string()),
-                (Err(e), Ok(_)) => Status::Error(format!("Saved without a picture: {e}")),
-                (Ok(_), Ok(saved)) => match saved.hook_errors.first() {
-                    Some(e) => Status::Error(e.to_string()),
-                    None => Status::Info(format!("Saved {}", crate::ui::describe_target(&saved.capture.intent.target))),
+            let status = match (picture, &saved, media_error) {
+                (_, Err(e), _) => Status::Error(e.to_string()),
+                (Err(e), Ok(_), _) => Status::Error(format!("Saved without a picture: {e}")),
+                (Ok(_), Ok(saved), media_error) => match (saved.hook_errors.first(), media_error) {
+                    (Some(e), _) => Status::Error(e.to_string()),
+                    (None, Some(e)) => Status::Error(format!("Saved, without the page's images and videos: {e}")),
+                    (None, None) => {
+                        Status::Info(format!("Saved {}", crate::ui::describe_target(&saved.capture.intent.target)))
+                    }
                 },
             };
-            // Keep the tweet's text and media in case it's deleted: in the background, so the card
-            // closes now.
-            if let Ok(saved) = saved
-                && matches!(saved.capture.page.as_ref().map(|p| &p.kind), Some(tin_core::page::PageKind::Tweet { .. }))
-            {
+            // Keep the tweet, and the images and videos, in case they're deleted: in the
+            // background, so the card closes now. One after the other, since each rewrites the
+            // capture.
+            if let Ok(saved) = saved {
+                let is_tweet = matches!(
+                    saved.capture.page.as_ref().map(|p| &p.kind),
+                    Some(tin_core::page::PageKind::Tweet { .. })
+                );
                 let (tin, main, id) = (tin.clone(), main.clone(), saved.capture.id.clone());
                 std::thread::spawn(move || {
-                    let status = match tin.archive_tweet(&id) {
-                        Ok(c) => Status::Info(format!(
-                            "Kept the tweet: its text and {} media file(s)",
-                            c.tweet.as_ref().map_or(0, |t| t.media.len())
-                        )),
-                        Err(e) => Status::Error(e.to_string()),
-                    };
-                    main.update(move |s, _| {
-                        s.reload();
-                        s.status = Some(status);
-                    });
+                    let mut statuses = Vec::new();
+                    if is_tweet {
+                        statuses.push(match tin.archive_tweet(&id) {
+                            Ok(c) => Status::Info(format!(
+                                "Kept the tweet: its text and {} media file(s)",
+                                c.tweet.as_ref().map_or(0, |t| t.media.len())
+                            )),
+                            Err(e) => Status::Error(e.to_string()),
+                        });
+                    }
+                    if has_media {
+                        statuses.push(match tin.keep_media(&id) {
+                            Ok(c) => kept_status(&c),
+                            Err(e) => Status::Error(format!("Couldn't keep the page's images and videos: {e}")),
+                        });
+                    }
+                    if let Some(status) =
+                        statuses.into_iter().reduce(|a, b| if matches!(a, Status::Error(_)) { a } else { b })
+                    {
+                        main.update(move |s, _| {
+                            s.reload();
+                            s.status = Some(status);
+                        });
+                    }
                 });
             }
             main.update(move |s, _| {
@@ -272,6 +306,32 @@ fn after_close(stage: Stage) -> (Stage, bool) {
     match stage {
         Stage::Noting { voice, .. } => (Stage::Idle, matches!(voice, Voice::Starting | Voice::Recording)),
         other => (other, false),
+    }
+}
+
+/// The images and videos Tin's extension finds where `pick` (monitor points) falls on `page`.
+/// Nothing when the pick misses the page or no extension reports the window.
+fn page_media(page: &WebPage, pick: Rect, window_title: &str) -> Result<Vec<Media>, AskError> {
+    let Some(area) = Area::within(pick, page.rect) else { return Ok(Vec::new()) };
+    let Some((browser, window)) = tin_core::bridge::browser_window(&tin_core::Paths::from_env().data, window_title)
+    else {
+        return Ok(Vec::new());
+    };
+    tin_core::bridge::ask::media_in(&browser, window, area)
+}
+
+/// How keeping a capture's images and videos went.
+fn kept_status(capture: &tin_core::capture::Capture) -> Status {
+    let media = capture.selection.as_ref().and_then(|s| s.content.as_ref()).map_or(&[][..], |c| &c.media[..]);
+    let kept = media.iter().filter(|m| matches!(m.kept, Kept::File { .. })).count();
+    match media.iter().find_map(|m| match &m.kept {
+        Kept::Missing { reason } => Some(reason),
+        Kept::File { .. } | Kept::NotYet => None,
+    }) {
+        Some(reason) => {
+            Status::Error(format!("Kept {kept} of {} images and videos; one wasn't: {reason}", media.len()))
+        }
+        None => Status::Info(format!("Kept {kept} image(s) and video(s) from the page")),
     }
 }
 

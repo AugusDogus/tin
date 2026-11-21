@@ -3,7 +3,10 @@
 //!
 //! The browser starts the helper (the `tin` command) for each message; it applies the message to
 //! the browser's state file and exits. Tin reads the files when it captures, so the extension
-//! works whether or not Tin's window app is running.
+//! works whether or not Tin's window app is running. Questions Tin asks the extension go through
+//! one helper the extension keeps open ([`ask`]).
+
+pub mod ask;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -171,6 +174,11 @@ pub fn load_all(data: &Path) -> Vec<(String, BrowserState)> {
 /// The text selected in the browser window titled `window_title`, from any browser's report.
 pub fn selection_for(data: &Path, window_title: &str) -> Option<Selected> {
     load_all(data).into_iter().find_map(|(_, state)| state.selection_for(window_title).cloned())
+}
+
+/// Which browser shows the window titled `window_title`, and the extension's id for that window.
+pub fn browser_window(data: &Path, window_title: &str) -> Option<(String, i64)> {
+    load_all(data).into_iter().find_map(|(browser, state)| state.window_for(window_title).map(|w| (browser, w)))
 }
 
 /// Applies one message to the browser's state file (written whole, then renamed into place).

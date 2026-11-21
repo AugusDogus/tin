@@ -51,8 +51,8 @@ pub struct Picked {
     pub rect: Rect,
     pub kind: SelectionKind,
     pub window: Option<Window>,
-    /// The web page picked from, as the browser described it: its address and title.
-    pub page: Option<(String, Option<String>)>,
+    /// The web page picked from, as the browser described it.
+    pub page: Option<tin_core::snapshot::WebPage>,
     /// The app's own element picked, when it came from the accessibility tree.
     pub node: Option<tin_core::context::atspi::Node>,
 }
@@ -340,7 +340,7 @@ impl Picker {
     }
 
     /// The page the element worker last saw in this window.
-    fn page_of(&self, output: &str, window: usize) -> Option<(String, Option<String>)> {
+    fn page_of(&self, output: &str, window: usize) -> Option<tin_core::snapshot::WebPage> {
         self.chain.as_ref().filter(|c| c.output == output && c.window == window).and_then(|c| c.page.clone())
     }
 }
