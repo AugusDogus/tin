@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tin_core::capture::Window;
-use tin_core::context::atspi::{Accessibility, Node};
+use tin_core::context::atspi::{Accessibility, Node, Stop};
 use tin_core::regions::Region;
 use tin_core::screenshot::Rect;
 use tin_core::snapshot::{SelectionKind, Snapshot};
@@ -96,7 +96,7 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
         let mut items = vec![Item { rect: win, label: window_label(&target.window), kind: SelectionKind::Window }];
         let mut page = None;
         // How deep the accessibility walk went before filtering, for the log.
-        let mut raw: Option<(usize, Option<String>)> = None;
+        let mut raw: Option<(usize, Option<String>, Stop)> = None;
 
         if let Some(a11y) = &a11y {
             let frame = frames.entry(key.clone()).or_insert_with(|| {
@@ -112,8 +112,8 @@ fn work(rx: &Receiver<Request>, answer: &Mutex<Option<Chain>>, wake: &dyn Fn()) 
             });
             if let Some((node, (dx, dy))) = frame {
                 let (x, y) = (request.point.0 - win.x + *dx, request.point.1 - win.y + *dy);
-                let found = a11y.chain_at(node, x, y);
-                raw = Some((found.len(), found.last().map(|e| e.role.clone())));
+                let (found, why) = a11y.chain_and_stop(node, x, y);
+                raw = Some((found.len(), found.last().map(|e| e.role.clone()), why));
                 for e in found {
                     // The innermost page wins (a frame inside a page is its own page).
                     if e.page.is_some() {
@@ -165,7 +165,13 @@ impl Log {
         Log(std::fs::File::create(path).ok())
     }
 
-    fn write(&mut self, request: &Request, chain: &Chain, accessibility: bool, raw: Option<&(usize, Option<String>)>) {
+    fn write(
+        &mut self,
+        request: &Request,
+        chain: &Chain,
+        accessibility: bool,
+        raw: Option<&(usize, Option<String>, Stop)>,
+    ) {
         use std::io::Write;
         let Some(file) = &mut self.0 else { return };
         let window = request.snap.windows.get(request.window).map(|w| window_label(&w.window)).unwrap_or_default();
@@ -181,7 +187,17 @@ impl Log {
         } else {
             "pixels"
         };
-        let raw = raw.map(|(n, deepest)| format!(", walk {n} deep to {}", deepest.as_deref().unwrap_or("?")));
+        let raw = raw.map(|(n, deepest, why)| {
+            format!(
+                ", walk {n} deep to {} (it has {} children: {} empty, {} away from the point, {} hidden{})",
+                deepest.as_deref().unwrap_or("?"),
+                why.children,
+                why.empty,
+                why.outside,
+                why.hidden,
+                if why.out_of_budget { "; out of budget" } else { "" }
+            )
+        });
         let _ = writeln!(
             file,
             "{} {:?} in {window:?} via {source}{}, page {:?}",

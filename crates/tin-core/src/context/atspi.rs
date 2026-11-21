@@ -44,6 +44,21 @@ pub struct Element {
     pub page: Option<(String, Option<String>)>,
 }
 
+/// Why a walk stopped where it did, for diagnosing pages that can't be picked into.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Stop {
+    /// Children the last element reported (GetChildren), including empty references.
+    pub children: usize,
+    /// Of those, empty references (`/null`: not built yet).
+    pub empty: usize,
+    /// Real children with no box, or a box away from the point.
+    pub outside: usize,
+    /// Real children at the point but not showing.
+    pub hidden: usize,
+    /// The call budget ran out.
+    pub out_of_budget: bool,
+}
+
 /// A connection to the accessibility bus.
 pub struct Accessibility {
     conn: Connection,
@@ -159,6 +174,11 @@ impl Accessibility {
     /// The elements under a point (window coordinates), outermost first, below `frame`. At each
     /// level [`topmost`] picks which child under the point to follow.
     pub fn chain_at(&self, frame: &Node, x: i32, y: i32) -> Vec<Element> {
+        self.chain_and_stop(frame, x, y).0
+    }
+
+    /// [`Accessibility::chain_at`], and why the walk stopped.
+    pub fn chain_and_stop(&self, frame: &Node, x: i32, y: i32) -> (Vec<Element>, Stop) {
         let mut budget = MAX_VISITS;
         let mut chain = Vec::new();
         let mut node = frame.clone();
@@ -168,13 +188,34 @@ impl Accessibility {
             // wrappers, and exploring every one of them multiplies at each level.
             let has_inside: Vec<bool> =
                 under.iter().map(|(child, _)| !self.under(child, x, y, &mut budget).is_empty()).collect();
-            let Some((child, rect)) = topmost(&has_inside).and_then(|i| under.into_iter().nth(i)) else { break };
+            let Some((child, rect)) = topmost(&has_inside).and_then(|i| under.into_iter().nth(i)) else {
+                return (chain, self.stop_at(&node, x, y, budget == 0));
+            };
             let role = self.role(&child);
             let page = role.starts_with("document").then(|| self.page(&child)).flatten();
             chain.push(Element { rect, role, name: self.name(&child), page });
             node = child;
         }
-        chain
+        (chain, Stop { out_of_budget: budget == 0, ..Stop::default() })
+    }
+
+    fn stop_at(&self, node: &Node, x: i32, y: i32, out_of_budget: bool) -> Stop {
+        let all: Vec<(String, OwnedObjectPath)> =
+            self.call(node, "org.a11y.atspi.Accessible", "GetChildren", &()).unwrap_or_default();
+        let mut stop = Stop { children: all.len(), out_of_budget, ..Stop::default() };
+        for (bus, path) in all {
+            if path.as_str().ends_with("/null") {
+                stop.empty += 1;
+                continue;
+            }
+            let child = Node { bus, path };
+            match self.extents(&child).filter(|r| r.contains(x, y)) {
+                None => stop.outside += 1,
+                Some(_) if !self.showing(&child) => stop.hidden += 1,
+                Some(_) => {}
+            }
+        }
+        stop
     }
 
     /// The children of `node` that are showing and contain the point, in tree order, within
